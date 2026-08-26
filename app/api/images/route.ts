@@ -1,0 +1,6 @@
+import {env} from "cloudflare:workers";
+import {getPasswordUser,isSecondFactorVerified} from "../../password-auth";
+import {ensureStudioSchema} from "../../../db";
+import {contentLengthTooLarge} from "../../api-security";
+
+export async function POST(req:Request){const user=await getPasswordUser();if(!user||!await isSecondFactorVerified(user.displayName))return Response.json({error:"Unauthorized"},{status:401});if(req.headers.get("content-type")?.split(";",1)[0]!=="image/png")return Response.json({error:"Only PNG images are accepted"},{status:415});if(contentLengthTooLarge(req,2_000_000))return Response.json({error:"Compressed image must be below 2 MB"},{status:413});const bytes=new Uint8Array(await req.arrayBuffer());if(!bytes.length||bytes.length>2_000_000)return Response.json({error:"Compressed image must be below 2 MB"},{status:413});const signature=[137,80,78,71,13,10,26,10];if(signature.some((value,index)=>bytes[index]!==value))return Response.json({error:"Uploaded data is not a valid PNG image"},{status:400});await ensureStudioSchema();const id=crypto.randomUUID();await env.DB.prepare("INSERT INTO presentation_images(id,user_id,content_type,data,created_at) VALUES(?,?,?,?,?)").bind(id,user.userId,"image/png",bytes,Date.now()).run();return Response.json({id,url:`/api/images/${id}`})}

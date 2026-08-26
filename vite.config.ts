@@ -1,6 +1,6 @@
 import { sites } from "@openai/sites-vite-plugin";
 import vinext from "vinext";
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import hostingConfig from "./.openai/hosting.json";
 
 const SITE_CREATOR_PLACEHOLDER_DATABASE_ID =
@@ -33,7 +33,8 @@ const localBindingConfig = {
     : [],
 };
 
-export default defineConfig(async () => {
+export default defineConfig(async ({mode}) => {
+  const localSecrets = loadEnv(mode, process.cwd(), "");
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
@@ -44,15 +45,28 @@ export default defineConfig(async () => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
-    server: isCodexSeatbeltSandbox
-      ? { watch: { useFsEvents: false, usePolling: true } }
-      : undefined,
+    server: {
+      // Listen on the Mac's network interfaces so trusted Tailscale peers can
+      // reach the development studio. Authentication and 2FA remain enforced.
+      host: "0.0.0.0",
+      ...(isCodexSeatbeltSandbox
+        ? { watch: { useFsEvents: false, usePolling: true } }
+        : {}),
+    },
     plugins: [
       vinext(),
       sites(),
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
-        config: localBindingConfig,
+        config: {
+          ...localBindingConfig,
+          vars: {
+            AUTH_USERNAME: localSecrets.AUTH_USERNAME,
+            AUTH_PASSWORD: localSecrets.AUTH_PASSWORD,
+            AUTH_SESSION_SECRET: localSecrets.AUTH_SESSION_SECRET,
+            TOTP_ENCRYPTION_KEY: localSecrets.TOTP_ENCRYPTION_KEY,
+          },
+        },
       }),
     ],
   };
