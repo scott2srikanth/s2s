@@ -1,6 +1,7 @@
 import {env} from "cloudflare:workers";import {cookies} from "next/headers";
 type AuthEnv={AUTH_USERNAME?:string;AUTH_PASSWORD?:string;AUTH_SESSION_SECRET?:string};const enc=new TextEncoder();
-function config(){const e=env as unknown as AuthEnv;if(!e.AUTH_USERNAME||!e.AUTH_PASSWORD||!e.AUTH_SESSION_SECRET)throw new Error("Password authentication is not configured");return e}
+export class AuthConfigurationError extends Error{constructor(){super("Required authentication bindings are unavailable");this.name="AuthConfigurationError"}}
+function config(){const worker=env as unknown as AuthEnv,node=typeof process!=="undefined"?process.env:{},e:AuthEnv={AUTH_USERNAME:worker.AUTH_USERNAME||node.AUTH_USERNAME,AUTH_PASSWORD:worker.AUTH_PASSWORD||node.AUTH_PASSWORD,AUTH_SESSION_SECRET:worker.AUTH_SESSION_SECRET||node.AUTH_SESSION_SECRET};if(!e.AUTH_USERNAME||!e.AUTH_PASSWORD||!e.AUTH_SESSION_SECRET||e.AUTH_SESSION_SECRET.length<32)throw new AuthConfigurationError();return e}
 async function digest(v:string){return new Uint8Array(await crypto.subtle.digest("SHA-256",enc.encode(v)))}
 async function equal(a:string,b:string){const[x,y]=await Promise.all([digest(a),digest(b)]);if(x.length!==y.length)return false;let n=0;for(let i=0;i<x.length;i++)n|=x[i]^y[i];return n===0}
 async function sign(v:string){const k=await crypto.subtle.importKey("raw",enc.encode(config().AUTH_SESSION_SECRET!),{name:"HMAC",hash:"SHA-256"},false,["sign"]);const s=new Uint8Array(await crypto.subtle.sign("HMAC",k,enc.encode(v)));return btoa(String.fromCharCode(...s)).replaceAll("+","-").replaceAll("/","_").replaceAll("=","")}

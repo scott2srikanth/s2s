@@ -14,6 +14,12 @@ export function rateLimit(key:string, limit:number, windowMs:number){
   return {allowed:true,retryAfter:0};
 }
 
+export function rateLimitStatus(key:string,limit:number){
+  const current=attempts.get(key),now=Date.now();
+  if(!current||current.resetAt<=now)return {allowed:true,retryAfter:0};
+  return current.count<limit?{allowed:true,retryAfter:0}:{allowed:false,retryAfter:Math.max(1,Math.ceil((current.resetAt-now)/1000))};
+}
+
 export function clearRateLimit(key:string){attempts.delete(key)}
 
 export function tooManyRequests(retryAfter:number){
