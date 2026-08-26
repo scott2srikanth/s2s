@@ -11,30 +11,25 @@ const { d1, r2 } = hostingConfig;
 // macOS Seatbelt blocks FSEvents, so Codex previews need polling for HMR.
 const isCodexSeatbeltSandbox = process.env.CODEX_SANDBOX === "seatbelt";
 
-const localBindingConfig = {
-  main: "./worker/index.ts",
-  compatibility_flags: ["nodejs_compat"],
-  d1_databases: d1
-    ? [
-        {
-          binding: d1,
-          database_name: "site-creator-d1",
-          database_id: SITE_CREATOR_PLACEHOLDER_DATABASE_ID,
-        },
-      ]
-    : [],
-  r2_buckets: r2
-    ? [
-        {
-          binding: r2,
-          bucket_name: "site-creator-r2",
-        },
-      ]
-    : [],
-};
-
 export default defineConfig(async ({mode}) => {
   const localSecrets = loadEnv(mode, process.cwd(), "");
+  const databaseId = localSecrets.D1_DATABASE_ID ||
+    (mode === "development" ? SITE_CREATOR_PLACEHOLDER_DATABASE_ID : undefined);
+  if (d1 && !databaseId) {
+    throw new Error(
+      "D1_DATABASE_ID is required for production builds. Create the S2S D1 database and configure its real UUID in the deployment environment."
+    );
+  }
+  const bindingConfig = {
+    main: "./worker/index.ts",
+    compatibility_flags: ["nodejs_compat"],
+    d1_databases: d1
+      ? [{binding:d1,database_name:"s2s",database_id:databaseId!}]
+      : [],
+    r2_buckets: r2
+      ? [{binding:r2,bucket_name:"site-creator-r2"}]
+      : [],
+  };
   // Keep Wrangler and Miniflare state project-local. These are non-secret tool
   // settings; application environment belongs in ignored `.env*` files.
   process.env.WRANGLER_WRITE_LOGS ??= "false";
@@ -59,7 +54,7 @@ export default defineConfig(async ({mode}) => {
       cloudflare({
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         config: {
-          ...localBindingConfig,
+          ...bindingConfig,
           vars: {
             AUTH_USERNAME: localSecrets.AUTH_USERNAME,
             AUTH_PASSWORD: localSecrets.AUTH_PASSWORD,
