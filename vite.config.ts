@@ -55,12 +55,14 @@ export default defineConfig(async ({mode}) => {
         viteEnvironment: { name: "rsc", childEnvironments: ["ssr"] },
         config: {
           ...bindingConfig,
-          vars: {
+          // Production authentication values are configured as encrypted
+          // Cloudflare secrets. Plain vars are only used by the local emulator.
+          vars: mode === "development" ? {
             AUTH_USERNAME: localSecrets.AUTH_USERNAME,
             AUTH_PASSWORD: localSecrets.AUTH_PASSWORD,
             AUTH_SESSION_SECRET: localSecrets.AUTH_SESSION_SECRET,
             TOTP_ENCRYPTION_KEY: localSecrets.TOTP_ENCRYPTION_KEY,
-          },
+          } : {},
         },
       }),
     ],

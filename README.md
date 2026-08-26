@@ -9,7 +9,7 @@ npx wrangler login
 npx wrangler d1 create s2s
 ```
 
-Copy the returned `database_id` UUID into the deployment environment as `D1_DATABASE_ID`. Also configure `AUTH_USERNAME`, `AUTH_PASSWORD`, `AUTH_SESSION_SECRET`, and `TOTP_ENCRYPTION_KEY` as encrypted secrets. Do not commit their values.
+Copy the returned `database_id` UUID into the deployment environment as `D1_DATABASE_ID`. Configure `AUTH_USERNAME`, `AUTH_PASSWORD`, `AUTH_SESSION_SECRET`, and `TOTP_ENCRYPTION_KEY` through the Cloudflare dashboard under **Workers & Pages → s2s → Settings → Variables and Secrets**, selecting **Encrypt** for every value. Do not commit their values.
 
 For a CLI deployment, export the database ID before building:
 
