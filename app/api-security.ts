@@ -20,7 +20,10 @@ export function tooManyRequests(retryAfter:number){
   return Response.json({error:"Too many attempts. Please wait and try again."},{status:429,headers:{"Retry-After":String(retryAfter)}});
 }
 
-export function secureCookie(request:Request){return new URL(request.url).protocol==="https:"?"; Secure":""}
+export function secureCookie(request:Request){
+  const forwarded=request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim().toLowerCase();
+  return forwarded==="https"||request.url.toLowerCase().startsWith("https://")?"; Secure":"";
+}
 
 export function contentLengthTooLarge(request:Request,maxBytes:number){
   const value=request.headers.get("content-length");
