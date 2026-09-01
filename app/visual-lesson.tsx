@@ -96,9 +96,7 @@ function MarkerStroke({
         begin={`${begin}s`}
         path={path}
         fill="freeze"
-        calcMode="spline"
-        keyTimes="0;1"
-        keySplines=".32 .02 .64 1"
+        calcMode="paced"
       />
       <animate
         attributeName="opacity"

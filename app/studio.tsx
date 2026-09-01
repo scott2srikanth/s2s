@@ -2995,19 +2995,23 @@ function Blueprint({ aiLocked, title, slides, setSlides, back, next }: any) {
                     <b>▧ Image direction</b>
                     <small>
                       {s.imageDescription ||
-                        "AI chose a text-led slide; no image is required."}
+                        (s.layout === "content-image"
+                          ? "Upload an image for the right-side visual frame."
+                          : "AI chose a text-led slide; no image is required.")}
                     </small>
-                    {s.imageDescription && (
+                    {(s.imageDescription || s.layout === "content-image") && (
                       <div className="imagePromptActions">
-                        <button
-                          onClick={() =>
-                            navigator.clipboard?.writeText(
-                              s.imageDescription || "",
-                            )
-                          }
-                        >
-                          ⧉ Copy image prompt
-                        </button>
+                        {s.imageDescription && (
+                          <button
+                            onClick={() =>
+                              navigator.clipboard?.writeText(
+                                s.imageDescription || "",
+                              )
+                            }
+                          >
+                            ⧉ Copy image prompt
+                          </button>
+                        )}
                         <label
                           className={
                             s.imageData ? "imageUpload added" : "imageUpload"
@@ -3015,7 +3019,9 @@ function Blueprint({ aiLocked, title, slides, setSlides, back, next }: any) {
                         >
                           {s.imageData
                             ? "✓ Replace uploaded image"
-                            : "↑ Upload generated image"}
+                            : s.imageDescription
+                              ? "↑ Upload generated image"
+                              : "↑ Upload image"}
                           <input
                             type="file"
                             accept="image/png,image/jpeg,image/webp"
@@ -3297,6 +3303,7 @@ function Editor({
                 key={cur.id}
                 s={cur}
                 editable={!aiLocked || cur.visualLesson?.mode === "diagram"}
+                assetEditable={cur.layout === "content-image"}
                 update={update}
                 moveShape={moveShape}
               />
@@ -3779,6 +3786,7 @@ function DiagramTools({
 export function SlideView({
   s,
   editable,
+  assetEditable,
   calloutEditable,
   presenting,
   update,
@@ -3786,12 +3794,14 @@ export function SlideView({
 }: {
   s: Slide;
   editable?: boolean;
+  assetEditable?: boolean;
   calloutEditable?: boolean;
   presenting?: boolean;
   update?: (f: keyof Slide, v: any) => void;
   moveShape?: (id: number, x: number, y: number) => void;
 }) {
   editable = editable || !s.aiGenerated;
+  const canEditImage = editable || !!assetEditable;
   const ed = editable
     ? { contentEditable: true, suppressContentEditableWarning: true }
     : {};
@@ -4103,17 +4113,17 @@ export function SlideView({
       {s.imageData && (
         <img
           onClick={() =>
-            editable &&
+            canEditImage &&
             update?.("__patch", {
               selectedBlock: "image",
               selectedImageId: undefined,
             })
           }
           onPointerDown={(e) =>
-            editable && e.currentTarget.setPointerCapture(e.pointerId)
+            canEditImage && e.currentTarget.setPointerCapture(e.pointerId)
           }
           onPointerMove={(e) =>
-            editable &&
+            canEditImage &&
             e.buttons === 1 &&
             e.currentTarget.hasPointerCapture(e.pointerId) &&
             moveBlock("image", e.clientX, e.clientY)
@@ -4157,7 +4167,7 @@ export function SlideView({
         <img
           key={image.id}
           onClick={() =>
-            editable &&
+            canEditImage &&
             update?.("__patch", {
               selectedBlock: "image",
               selectedImageId: image.id,
@@ -4167,10 +4177,10 @@ export function SlideView({
           src={image.src}
           alt="Added slide visual"
           onPointerDown={(e) =>
-            editable && e.currentTarget.setPointerCapture(e.pointerId)
+            canEditImage && e.currentTarget.setPointerCapture(e.pointerId)
           }
           onPointerMove={(e) =>
-            editable &&
+            canEditImage &&
             e.buttons === 1 &&
             e.currentTarget.hasPointerCapture(e.pointerId) &&
             moveCanvasImage(image.id, e.clientX, e.clientY)
@@ -4187,7 +4197,7 @@ export function SlideView({
           }}
         />
       ))}
-      {editable &&
+      {canEditImage &&
         s.selectedBlock === "image" &&
         (() => {
           const image = (s.images || []).find(
