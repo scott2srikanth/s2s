@@ -82,11 +82,11 @@ function MarkerStroke({
   size?: number;
 }) {
   return (
-    <g className="syncedDrawingHand">
+    <g className="syncedDrawingHand" opacity="0">
       <image
         href="/assets/drawing-hand.png"
         x={-size * 0.12}
-        y={-size * 0.17}
+        y={-size * 0.08}
         width={size}
         height={size * 1.52}
         preserveAspectRatio="xMinYMin meet"

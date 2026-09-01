@@ -136,8 +136,10 @@
   object-fit: contain;
 }
 .syncedDrawingHand {
-  opacity: 0;
   pointer-events: none;
+  visibility: visible;
+}
+.syncedDrawingHand image {
   filter: drop-shadow(0 8px 9px #20253228);
 }
 .diagramLesson.isPresenting .drawingHand {
