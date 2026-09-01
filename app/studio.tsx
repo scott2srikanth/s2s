@@ -19,6 +19,7 @@ type Shape = {
   y: number;
   color: string;
   glyph?: string;
+  selected?: boolean;
 };
 type CanvasImage = {
   id: number;
@@ -3113,11 +3114,49 @@ function Editor({
         flash(error instanceof Error ? error.message : "Image upload failed");
       }
     };
-  const shape = (type: Shape["type"]) =>
-    update("shapes", [
-      ...(cur.shapes || []),
-      { id: Date.now(), type, x: 68, y: 62, color: "#e85d3f" },
-    ]);
+  const shape = (type: Shape["type"]) => {
+    const id = Date.now();
+    update("__patch", {
+      selectedBlock: undefined,
+      selectedImageId: undefined,
+      shapes: [
+        ...(cur.shapes || []).map((item: Shape) => ({ ...item, selected: false })),
+        { id, type, x: 68, y: 62, color: "#e85d3f", selected: true },
+      ],
+    });
+  };
+  const selectedShapeCount = (cur.shapes || []).filter(
+    (item: Shape) => item.selected,
+  ).length;
+  const deselectCanvas = () =>
+    update("__patch", {
+      selectedBlock: undefined,
+      selectedImageId: undefined,
+      shapes: (cur.shapes || []).map((item: Shape) => ({
+        ...item,
+        selected: false,
+      })),
+    });
+  const deleteSelectedShapes = () => {
+    if (!selectedShapeCount) return;
+    update(
+      "shapes",
+      (cur.shapes || []).filter((item: Shape) => !item.selected),
+    );
+    flash(`${selectedShapeCount} shape${selectedShapeCount === 1 ? "" : "s"} deleted`);
+  };
+  const addBodyBullets = () => {
+    const items = (cur.body || "")
+      .split(/\n+|\s+-\s+|(?<=[.!?])\s+(?=[A-Z])/)
+      .map((item: string) => item.trim().replace(/^[•\-–—]\s*/, ""))
+      .filter(Boolean);
+    if (!items.length) return;
+    update("__patch", {
+      body: items.map((item: string) => `• ${item}`).join("\n"),
+      selectedBlock: "body",
+    });
+    flash("Content formatted as bullet points");
+  };
   const moveShape = (id: number, cx: number, cy: number) => {
     const el = document
       .querySelector(".editor .slide")
@@ -3211,6 +3250,22 @@ function Editor({
               <button onClick={() => setLeftCollapsed((value) => !value)} title="Toggle slide panel">{leftCollapsed ? "☰ Slides" : "◀ Slides"}</button>
               <button onClick={() => setRightCollapsed((value) => !value)} title="Toggle inspector panel">{rightCollapsed ? "Inspector ☰" : "Inspector ▶"}</button>
               <button onClick={() => setNotesCollapsed((value) => !value)} title="Toggle speaker notes">{notesCollapsed ? "Notes ▲" : "Notes ▼"}</button>
+            </div>
+            <div className="toolGroup selectionTools" aria-label="Canvas selection tools">
+              <button onClick={deselectCanvas} title="Clear the current canvas selection">
+                ◇ Deselect
+              </button>
+              <button
+                className="deleteSelection"
+                disabled={!selectedShapeCount}
+                onClick={deleteSelectedShapes}
+                title="Delete selected shape"
+              >
+                ⌫ Delete{selectedShapeCount > 1 ? ` (${selectedShapeCount})` : ""}
+              </button>
+              <button onClick={addBodyBullets} title="Format slide content as bullet points">
+                • Bullets
+              </button>
             </div>
             {cur.visualLesson?.mode === "diagram" && (
               <div className="diagramToolbarTop">
@@ -3802,6 +3857,7 @@ export function SlideView({
 }) {
   editable = editable || !s.aiGenerated;
   const canEditImage = editable || !!assetEditable;
+  const canEditShapes = !!update && !presenting;
   const ed = editable
     ? { contentEditable: true, suppressContentEditableWarning: true }
     : {};
@@ -3957,6 +4013,30 @@ export function SlideView({
             update?.("visualLesson", { ...s.visualLesson, diagram })
           }
         />
+        {s.imageData && (
+          <img
+            className={`slideAsset visualLessonAsset ai-${(s.motion || "reveal").replaceAll(" ", "-")} ${s.selectedBlock === "image" ? "selectedCanvasBlock" : ""}`}
+            src={s.imageData}
+            alt={s.imageDescription || "Uploaded slide visual"}
+            onClick={() => canEditImage && update?.("__patch", { selectedBlock: "image", selectedImageId: undefined })}
+            onPointerDown={(event) => canEditImage && event.currentTarget.setPointerCapture(event.pointerId)}
+            onPointerMove={(event) => canEditImage && event.buttons === 1 && event.currentTarget.hasPointerCapture(event.pointerId) && moveBlock("image", event.clientX, event.clientY)}
+            style={{
+              left: `${s.imageX ?? 76}%`, top: `${s.imageY ?? 50}%`,
+              width: `${s.imageW ?? 38}%`, height: `${s.imageH ?? 62}%`, right: "auto",
+              objectFit: s.imageFit || "contain", opacity: (s.imageOpacity ?? 100) / 100,
+              filter: `brightness(${s.imageBrightness || 100}%) contrast(${s.imageContrast || 100}%) saturate(${s.imageSaturation || 100}%)`,
+            }}
+          />
+        )}
+        {canEditImage && s.imageData && s.selectedBlock === "image" && (
+          <span className="canvasSelection visualLessonImageSelection" style={{ left: `${s.imageX ?? 76}%`, top: `${s.imageY ?? 50}%`, width: `${s.imageW ?? 38}%`, height: `${s.imageH ?? 62}%` }}>
+            {["nw", "ne", "sw", "se"].map((handle) => (
+              <i key={handle} className={`resizeHandle ${handle}`} onPointerDown={(event) => event.currentTarget.setPointerCapture(event.pointerId)} onPointerMove={(event) => event.buttons === 1 && event.currentTarget.hasPointerCapture(event.pointerId) && resizeImage(undefined, event.clientX, event.clientY)} />
+            ))}
+            <b className="selectionLabel">Uploaded image</b>
+          </span>
+        )}
         <em>{String(s.id).padStart(2, "0")}</em>
       </article>
     );
@@ -4241,16 +4321,27 @@ export function SlideView({
       {(s.shapes || []).map((shape) => (
         <i
           key={shape.id}
-          onPointerDown={(e) =>
-            editable && e.currentTarget.setPointerCapture(e.pointerId)
-          }
+          onPointerDown={(e) => {
+            if (!canEditShapes) return;
+            e.stopPropagation();
+            const additive = e.shiftKey || e.metaKey || e.ctrlKey;
+            update?.(
+              "shapes",
+              (s.shapes || []).map((item: Shape) =>
+                item.id === shape.id
+                  ? { ...item, selected: additive ? !item.selected : true }
+                  : { ...item, selected: additive ? item.selected : false },
+              ),
+            );
+            e.currentTarget.setPointerCapture(e.pointerId);
+          }}
           onPointerMove={(e) =>
-            editable &&
+            canEditShapes &&
             e.buttons === 1 &&
             e.currentTarget.hasPointerCapture(e.pointerId) &&
             moveShape?.(shape.id, e.clientX, e.clientY)
           }
-          className={`userShape ${shape.type}`}
+          className={`userShape ${shape.type} ${shape.selected ? "selectedShape" : ""}`}
           style={
             {
               left: `${shape.x}%`,

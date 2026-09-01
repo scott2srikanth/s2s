@@ -8,6 +8,19 @@
   --accent: #ef6b43;
   font-family: var(--sans), Arial, sans-serif;
 }
+
+.visualLessonSlide .visualLessonAsset {
+  z-index: 7;
+  border: 1px solid #d7dee7;
+  background: #fff;
+  box-shadow: 0 16px 34px #10182824;
+}
+.visualLessonSlide:has(.visualLessonAsset).content-image .splitCodeWindow {
+  visibility: hidden;
+}
+.visualLessonImageSelection {
+  z-index: 12;
+}
 * {
   box-sizing: border-box;
 }
@@ -5850,6 +5863,7 @@ a.logo {
 }
 .diagramEditBar{position:absolute;z-index:40;right:5%;top:4%;display:flex;align-items:center;gap:7px}.diagramEditBar .svgDrawingUpload{position:static!important;inset:auto!important;translate:none!important}.diagramTools{display:flex;align-items:center;gap:4px;padding:4px;border:1px solid #dce3eb;border-radius:9px;background:#fffffff2;box-shadow:0 7px 22px #10182815;backdrop-filter:blur(8px)}.diagramTools>span{padding:0 5px;color:#7b8491;font:750 7px/1 var(--sans);letter-spacing:.08em;text-transform:uppercase}.diagramTools button{min-height:27px;padding:6px 8px;border:0;border-radius:6px;background:transparent;color:#344054;font:700 8px/1 var(--sans);cursor:pointer}.diagramTools button:hover{background:#eef3ff;color:#3158a5}.aiBlueprintPreview .diagramEditBar,.present .diagramEditBar{display:none}
 .panelControls{display:flex;align-items:center;gap:4px;padding-right:8px;border-right:1px solid #e1e6ec}.panelControls button{white-space:nowrap}.diagramToolbarTop{display:flex;align-items:center;gap:6px}.diagramToolbarTop .diagramTools{padding:2px;box-shadow:none;background:#fff}.diagramToolbarTop .svgDrawingUpload{position:static!important;inset:auto!important;translate:none!important;min-height:31px;margin:0;padding:7px 9px}.diagramTools .deleteDiagramComponent{color:#b42318}.diagramTools .deleteDiagramComponent:disabled{opacity:.35;cursor:not-allowed}.editor.leftCollapsed .workspace{grid-template-columns:0 minmax(0,1fr) 330px}.editor.rightCollapsed .workspace{grid-template-columns:190px minmax(0,1fr) 0}.editor.leftCollapsed.rightCollapsed .workspace{grid-template-columns:0 minmax(0,1fr) 0}.editor.leftCollapsed .slides,.editor.rightCollapsed .copilot{visibility:hidden;overflow:hidden;border:0}.editor.leftCollapsed .stage,.editor.rightCollapsed .stage{min-width:0}.editor.leftCollapsed .canvas>div,.editor.rightCollapsed .canvas>div{max-width:min(1120px,96%)}
+.selectionTools{white-space:nowrap}.selectionTools .deleteSelection{color:#b42318}.selectionTools button:disabled{opacity:.38;cursor:not-allowed}
 .editor.notesCollapsed .stage{grid-template-rows:42px minmax(0,1fr) 32px}.editor.notesCollapsed .notes{display:none}.editor.notesCollapsed .canvas>div,.editor.leftCollapsed .canvas>div,.editor.rightCollapsed .canvas>div{width:min(1240px,96%);max-width:none;height:auto;aspect-ratio:16/9}.editor.leftCollapsed.rightCollapsed.notesCollapsed .canvas>div{width:min(1420px,97%)}.notes .collapseNotes{margin-left:auto!important;margin-right:8px!important;color:#667085!important}.editor.aiLocked.notesCollapsed .stage{grid-template-rows:42px minmax(0,1fr) 32px}
 @media (max-width: 1100px) {
   .editor > header nav {
@@ -5936,6 +5950,11 @@ a.logo {
 }
 .userShape:active {
   cursor: grabbing;
+}
+.editor .userShape.selectedShape {
+  outline: 2px dashed #4f7cff;
+  outline-offset: 6px;
+  filter: drop-shadow(0 0 2px #fff);
 }
 .userShape.rectangle {
   width: 90px;
