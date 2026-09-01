@@ -36,7 +36,7 @@ type CalloutPosition = {
   y: number;
   arrow: "left" | "right" | "up" | "down";
 };
-type Slide = {
+export type Slide = {
   id: number;
   title: string;
   tag: string;
@@ -85,6 +85,7 @@ type SavedDeck = {
   title: string;
   updatedAt: number;
   slides: Slide[];
+  presenterEnabled?: boolean;
 };
 const stripDeckImages = (deck: SavedDeck): SavedDeck => ({
   ...deck,
@@ -1705,6 +1706,32 @@ export default function Studio() {
       flash("Could not delete presentation — please try again");
     }
   }
+  async function togglePresenter(deck: SavedDeck) {
+    const presenterEnabled = !deck.presenterEnabled;
+    try {
+      const response = await fetch("/api/presentations", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: deck.id, presenterEnabled }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Assignment failed");
+      setSavedDecks((all) => {
+        const next = all.map((item) =>
+          item.id === deck.id ? { ...item, presenterEnabled } : item,
+        );
+        writeDeckIndex(next);
+        return next;
+      });
+      flash(
+        presenterEnabled
+          ? "Presentation is ready for presenters"
+          : "Presentation removed from the presenter desk",
+      );
+    } catch (error) {
+      flash(error instanceof Error ? error.message : "Could not update presenter access");
+    }
+  }
   function openDeck(deck: SavedDeck) {
     setDeckId(deck.id);
     setDeckTitle(deck.title);
@@ -1857,6 +1884,7 @@ export default function Studio() {
             savedDecks={savedDecks}
             openDeck={openDeck}
             deleteDeck={deleteDeck}
+            togglePresenter={togglePresenter}
           />
           <button
             className="reactLessonLaunch"
@@ -2091,6 +2119,7 @@ function Home({
   savedDecks,
   openDeck,
   deleteDeck,
+  togglePresenter,
 }: {
   create: () => void;
   open: () => void;
@@ -2098,6 +2127,7 @@ function Home({
   savedDecks: SavedDeck[];
   openDeck: (d: SavedDeck) => void;
   deleteDeck: (d: SavedDeck) => void;
+  togglePresenter: (d: SavedDeck) => void;
 }) {
   const samples = [
     ["Convolutional Neural Networks", "Teaching · 10 slides", "CNNs", "coral"],
@@ -2161,6 +2191,13 @@ function Home({
                   aria-label={`Delete ${d.title}`}
                 >
                   ⌫
+                </button>
+                <button
+                  className={d.presenterEnabled ? "presenterTag active" : "presenterTag"}
+                  onClick={() => togglePresenter(d)}
+                  title={d.presenterEnabled ? "Remove from presenter desk" : "Make available to presenters"}
+                >
+                  {d.presenterEnabled ? "✓ Ready for presenter" : "＋ Assign presenter"}
                 </button>
               </article>
             ))}
@@ -3739,7 +3776,7 @@ function DiagramTools({
     </div>
   );
 }
-function SlideView({
+export function SlideView({
   s,
   editable,
   calloutEditable,
