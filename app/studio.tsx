@@ -1,149 +1,5008 @@
 "use client";
-import {useEffect,useMemo,useState} from "react";
-type View="home"|"templates"|"create"|"bridge"|"blueprint"|"edit"|"present";
-type Shape={id:number,type:"circle"|"rectangle"|"line"|"symbol",x:number,y:number,color:string,glyph?:string};
-type CanvasImage={id:number,src:string,x:number,y:number,w:number,h:number,opacity?:number,fit?:"cover"|"contain",radius?:number};
-type CalloutPosition={x:number,y:number,arrow:"left"|"right"|"up"|"down"};
-type Slide={id:number,title:string,tag:string,body:string,layout:string,notes:string,theme?:string,imageDescription?:string,motion?:string,imageData?:string,images?:CanvasImage[],background?:string,shapes?:Shape[],fontFamily?:string,titleSize?:number,bodySize?:number,textColor?:string,textAlign?:"left"|"center"|"right",bodyAlign?:"left"|"center"|"right",imageBrightness?:number,imageContrast?:number,imageSaturation?:number,imageOpacity?:number,imageFit?:"cover"|"contain",selectedBlock?:"title"|"body"|"image",selectedImageId?:number,selectedCallout?:number,codeCallouts?:CalloutPosition[],titleX?:number,titleY?:number,titleW?:number,bodyX?:number,bodyY?:number,bodyW?:number,imageX?:number,imageY?:number,imageW?:number,imageH?:number,titleAnimation?:string,bodyAnimation?:string,aiGenerated?:boolean};
-type SavedDeck={id:string,title:string,updatedAt:number,slides:Slide[]};
-const stripDeckImages=(deck:SavedDeck):SavedDeck=>({...deck,slides:deck.slides.map(slide=>({...slide,imageData:undefined,images:[]}))});
-function writeDeckIndex(decks:SavedDeck[]){try{localStorage.setItem("s2s-decks",JSON.stringify(decks.map(stripDeckImages)))}catch{try{localStorage.removeItem("s2s-decks");localStorage.setItem("s2s-decks",JSON.stringify(decks.slice(0,12).map(stripDeckImages)))}catch{}}}
-function deckStore(){return new Promise<IDBDatabase>((resolve,reject)=>{const request=indexedDB.open("s2s-studio",1);request.onupgradeneeded=()=>{if(!request.result.objectStoreNames.contains("decks"))request.result.createObjectStore("decks",{keyPath:"id"})};request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error)})}
-async function saveDeckAssets(deck:SavedDeck){try{const db=await deckStore();await new Promise<void>((resolve,reject)=>{const transaction=db.transaction("decks","readwrite");transaction.objectStore("decks").put(deck);transaction.oncomplete=()=>resolve();transaction.onerror=()=>reject(transaction.error)});db.close()}catch{}}
-async function loadDeckAssets(){try{const db=await deckStore();const decks=await new Promise<SavedDeck[]>((resolve,reject)=>{const request=db.transaction("decks").objectStore("decks").getAll();request.onsuccess=()=>resolve(request.result||[]);request.onerror=()=>reject(request.error)});db.close();return decks}catch{return []}}
-async function deleteDeckAssets(id:string){try{const db=await deckStore();await new Promise<void>((resolve,reject)=>{const transaction=db.transaction("decks","readwrite");transaction.objectStore("decks").delete(id);transaction.oncomplete=()=>resolve();transaction.onerror=()=>reject(transaction.error)});db.close()}catch{}}
-async function compressToPng(file:File){const bitmap=await createImageBitmap(file);let scale=Math.min(1,1400/Math.max(bitmap.width,bitmap.height)),blob:Blob|null=null;for(let attempt=0;attempt<4;attempt++){const canvas=document.createElement("canvas");canvas.width=Math.max(1,Math.round(bitmap.width*scale));canvas.height=Math.max(1,Math.round(bitmap.height*scale));const context=canvas.getContext("2d");if(!context)throw new Error("Image conversion is unavailable");context.imageSmoothingEnabled=true;context.imageSmoothingQuality="high";context.drawImage(bitmap,0,0,canvas.width,canvas.height);blob=await new Promise(resolve=>canvas.toBlob(resolve,"image/png"));if(blob&&blob.size<=1_900_000)break;scale*=.72}bitmap.close();if(!blob)throw new Error("Image conversion failed");if(blob.size>2_000_000)throw new Error("Image remains too large after PNG compression");return blob}
-async function uploadPng(file:File){const png=await compressToPng(file);const response=await fetch("/api/images",{method:"POST",headers:{"Content-Type":"image/png"},body:png});const result=await response.json();if(!response.ok)throw new Error(result.error||"Image upload failed");const url=result.url as string;const check=await fetch(url,{cache:"no-store"});if(!check.ok||!check.headers.get("content-type")?.startsWith("image/"))throw new Error("Image was saved but its preview could not be loaded");return url}
-async function syncDeck(deck:SavedDeck){try{return (await fetch("/api/presentations",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(deck)})).ok}catch{return false}}
-const starter:Slide[]=[
-{id:1,title:"Convolutional\nNeural Networks",tag:"VISUAL INTELLIGENCE • 60 MIN",body:"How machines learn to see — from pixels to patterns.",layout:"cover",notes:"Open with a question: how does a computer know there is a cat in a photo?"},
-{id:2,title:"Why not a regular network?",tag:"THE CORE PROBLEM",body:"A 224 × 224 color image contains 150,528 values. Fully connecting them ignores where each pixel lives.",layout:"number",notes:"Contrast spatial awareness with a flattened list of pixels."},
-{id:3,title:"An image is a matrix",tag:"01 • IMAGES AS DATA",body:"Each cell stores intensity. Color images stack three matrices — red, green and blue.",layout:"matrix",notes:"Ask learners to identify what the brightest cells represent."},
-{id:4,title:"A tiny window,\na useful pattern",tag:"02 • CONVOLUTION",body:"A kernel slides across the image, multiplying and summing local values to detect edges, textures and shapes.",layout:"process",notes:"Use the window analogy. Spend about 4 minutes here."},
-{id:5,title:"One filter, one feature map",tag:"03 • FEATURE MAPS",body:"Different filters light up different evidence: edges, curves, textures, then higher-level forms.",layout:"cards",notes:"Emphasize that filters are learned, not hand-coded."},
-{id:6,title:"Keep the signal.\nShrink the noise.",tag:"04 • POOLING",body:"Max pooling preserves the strongest local activation while reducing spatial size and computation.",layout:"comparison",notes:"Walk through one 2×2 pooling calculation."},
-{id:7,title:"From pixels to prediction",tag:"05 • ARCHITECTURE",body:"Image → Convolution → ReLU → Pooling → Dense layer → Class probabilities",layout:"architecture",notes:"Trace one image from left to right."},
-{id:8,title:"A CNN in 7 lines",tag:"06 • BUILD IT",body:"model = Sequential([\n  Conv2D(32, 3, activation='relu'),\n  MaxPooling2D(),\n  Flatten(),\n  Dense(10, activation='softmax')\n])",layout:"code",notes:"Explain what each layer contributes."},
-{id:9,title:"Learning is an\nerror-correction loop",tag:"07 • TRAINING",body:"Predict → Measure loss → Backpropagate → Update filters → Repeat",layout:"cycle",notes:"Connect the loop to familiar feedback systems."},
-{id:10,title:"See locally.\nLearn hierarchically.",tag:"SUMMARY",body:"CNNs preserve spatial structure, learn reusable filters, and build complex ideas from simple visual features.",layout:"summary",notes:"Close with: why is convolution a better fit for images?"}];
-const modes=["Teaching","Coding","Marketing","Business","Professional","Workshop","Research"];
-const templateSystems:Record<string,{theme:string;story:[string,string,string,string][]}>={
- "Visual Classroom":{theme:"classroom",story:[["Make the invisible\nvisible","TEACHING STORY • 45 MIN","A visual lesson about turning difficult ideas into memorable mental models.","cover"],["Start with what\nthey already know","01 • PRIOR KNOWLEDGE","Anchor every new concept to a familiar object, action or experience.","number"],["One idea,\none diagram","02 • VISUAL MODEL","Remove decoration. Keep only the parts that explain how the idea works.","matrix"],["Reveal complexity\nin layers","03 • PROGRESSIVE DISCLOSURE","Show the foundation first, then introduce one meaningful relationship at a time.","process"],["Check for\nunderstanding","04 • ACTIVE RECALL","Ask learners to predict, explain and apply—not simply repeat.","cycle"],["Clarity creates\nconfidence","TAKEAWAY","Teach from familiar to new, concrete to abstract, and simple to connected.","summary"]]},
- "Developer Workshop":{theme:"developer",story:[["Build a reliable\nAPI client","HANDS-ON ENGINEERING • 90 MIN","From first request to production-ready retries, validation and observability.","cover"],["Define the contract\nfirst","01 • INTERFACE","Make inputs, outputs and failure states explicit before implementation begins.","architecture"],["The smallest\nworking request","02 • CODE ALONG","const response = await fetch(url, { headers });\nif (!response.ok) throw new ApiError(response);","code"],["Failures are\npart of the design","03 • RESILIENCE","Timeout → Retry with jitter → Circuit break → Useful fallback","process"],["Test behavior,\nnot implementation","04 • PRACTICE","Validate success, malformed data, slow networks and authentication failures.","comparison"],["Ship with\nconfidence","WORKSHOP RECAP","A strong client is typed, observable, resilient and easy to change.","summary"]]},
- "Product Narrative":{theme:"product",story:[["Make the new way\nfeel inevitable","PRODUCT LAUNCH • NARRATIVE","A customer-centered story from daily friction to a distinctly better future.","cover"],["The cost of\ntoday's workaround","01 • TENSION","Teams lose 11 hours each week switching tools, rebuilding context and chasing decisions.","number"],["Meet the moment\nthat matters","02 • CUSTOMER","The breakthrough is not another feature—it is a faster path from intent to outcome.","cards"],["One flow.\nZero handoffs.","03 • EXPERIENCE","Capture → Understand → Create → Share","process"],["Why we win\nnow","04 • DIFFERENTIATION","Less setup. Smarter defaults. A result users can trust on the first attempt.","comparison"],["From busywork\nto momentum","LAUNCH PROMISE","Give every team more time for the work only they can do.","summary"]]},
- "Executive Review":{theme:"executive",story:[["Q3 Business\nReview","EXECUTIVE BRIEF • CONFIDENTIAL","Performance, decisions and the three moves that matter next.","cover"],["Growth is healthy—\nquality improved","01 • SCORECARD","84% of plan achieved with margin expanding and retention at a twelve-month high.","number"],["What moved\nthe business","02 • DRIVERS","Enterprise expansion offset slower acquisition in the mid-market segment.","comparison"],["Three decisions\nneeded today","03 • DECISIONS","Approve hiring sequence. Protect platform investment. Focus the launch market.","cards"],["Next quarter's\noperating path","04 • FORWARD PLAN","Stabilize → Scale → Expand → Measure","architecture"],["Focused execution.\nMeasured growth.","EXECUTIVE CLOSE","Align resources behind the highest-confidence path to durable growth.","summary"]]},
- "Research Brief":{theme:"research",story:[["What changes\nwhen AI assists?","RESEARCH BRIEF • 2026","A controlled study of decision quality, speed and confidence in knowledge work.","cover"],["The research\nquestion","01 • HYPOTHESIS","Does structured AI assistance improve outcomes without increasing overconfidence?","number"],["A balanced\nstudy design","02 • METHOD","240 participants across four roles, randomized into assisted and control cohorts.","matrix"],["Signal over\nnoise","03 • FINDINGS","Assisted teams were faster and more consistent; expert review remained essential.","comparison"],["What the evidence\nsupports","04 • INTERPRETATION","Use AI for exploration and structure. Keep accountable judgment with people.","cards"],["Augment decisions.\nPreserve agency.","CONCLUSION","The best systems improve both capability and calibration.","summary"]]},
- "Founder Pitch":{theme:"founder",story:[["Infrastructure for\nthe idea economy","SEED ROUND • 2026","S2S turns raw expertise into presentations people understand and remember.","cover"],["Great ideas are\nlost in bad slides","01 • PROBLEM","73% of knowledge workers spend more time formatting than shaping the story.","number"],["From thought\nto narrative","02 • SOLUTION","Brief → Intelligent blueprint → Professional deck → Confident delivery","architecture"],["A workflow users\nalready understand","03 • PRODUCT","Bring any idea. Keep control. Leave with something worth showing.","process"],["A focused path\nto scale","04 • TRACTION","Education proves engagement. Teams unlock expansion. Enterprise compounds value.","cards"],["Help every idea\nland","THE ASK","Partner with us to build the presentation layer for human knowledge.","summary"]]},
- "Editorial Keynote":{theme:"editorial",story:[["Attention is\na design material","EDITORIAL KEYNOTE • 30 MIN","What great storytellers understand about rhythm, restraint and revelation.","cover"],["Silence gives\nideas weight","ACT I • RESTRAINT","Whitespace is not empty. It gives the audience room to notice what matters.","content"],["One unforgettable\nnumber","ACT II • EMPHASIS","3 seconds: the time an audience needs to decide whether to keep listening.","number"],["Contrast creates\nmeaning","ACT III • RHYTHM","Quiet before loud. Detail before scale. Question before answer.","comparison"],["Build toward\nthe turn","ACT IV • REVELATION","Every section should change how the audience understands the opening idea.","process"],["Design what they\nremember","FINALE","A keynote succeeds when its central thought keeps moving after the room is empty.","summary"]]},
- "Hands-on Lab":{theme:"lab",story:[["Prototype an AI\nfeature in 60 minutes","GUIDED LAB • BUILD TO LEARN","A practical session with short concepts, live building and reflection checkpoints.","cover"],["Define the job\nbefore the model","01 • FRAME","Write one user, one situation and one observable successful outcome.","process"],["Create the first\nprompt contract","02 • BUILD","{ role: 'coach', input, constraints, output_schema }","code"],["Test the edges,\nnot the happy path","03 • EXPERIMENT","Compare vague, incomplete and conflicting inputs before polishing the UI.","comparison"],["Observe. Adjust.\nRun again.","04 • ITERATE","Prototype → Test → Inspect → Improve","cycle"],["Small loops create\nstrong systems","LAB RECAP","Leave with one working flow, three learned constraints and a clear next experiment.","summary"]]},
- "Institutional Showcase":{theme:"institutional",story:[["A campus built\nfor what comes next","INSTITUTIONAL PROFILE • MARKETING","A confident introduction to the institution, its learning environment and the outcomes families value.","cover"],["A legacy that keeps\nmoving forward","01 • OUR STORY","Milestones, academic growth and industry relevance presented as one credible institutional journey.","process"],["Infrastructure that\nsupports ambition","02 • CAMPUS EXPERIENCE","Purpose-built classrooms, laboratories, libraries and collaborative spaces make learning visible and tangible.","matrix"],["Programs aligned\nwith opportunity","03 • ACADEMICS","Clear pathways connect foundational learning, specialist programs, research exposure and career readiness.","cards"],["Learning extends\nbeyond the classroom","04 • STUDENT EXPERIENCE","Mentorship, projects, clubs, sports and cultural experiences help students build confidence and capability.","comparison"],["Evidence families\ncan evaluate","05 • OUTCOMES","Show placement reach, employer participation, progression and student achievement with transparent proof.","number"],["Industry connection\nis part of the system","06 • PARTNERSHIPS","Research, internships, capstone projects and employer engagement turn academic learning into professional momentum.","architecture"],["Choose a place\nwhere potential grows","ADMISSIONS • NEXT STEP","Invite families to visit, ask questions and see the learning environment for themselves.","summary"]]}
+import { useEffect, useMemo, useState } from "react";
+import VisualLessonScene, {
+  type ImportedSvgDrawing,
+  type VisualLessonSpec,
+} from "./visual-lesson";
+type View =
+  | "home"
+  | "templates"
+  | "create"
+  | "bridge"
+  | "blueprint"
+  | "edit"
+  | "present";
+type Shape = {
+  id: number;
+  type: "circle" | "rectangle" | "line" | "symbol";
+  x: number;
+  y: number;
+  color: string;
+  glyph?: string;
 };
-function slidesForKmtiReference():Slide[]{const titles=["Keshav Memorial Technological Institute","Presentation by Shri Neil Gogte","Institutional journey","Campus Infrastructure","Campus Infrastructure · Facilities","Bhavishya Dwar","Market Trends","Why Deemed to be University?","Campus Experience","Learning Frameworks","Classroom Reimagined","Faculty and Mentorship","Academic Programs","Academic Programs · Postgraduate","Capstone Projects","Student Learning Spaces","Student Life","Technology Enabled Learning","Technology Ecosystem","K-HUB Incubation Forum","High Impact Research","String of Pearls","Research Paradigms","Research Labs and Programs","Defence Research Projects","CyberGuard 360, USA","SyncSilica, USA","IIT Madras BS Degree Program","Student Success Model","KMTI Learning Path","AI and the Future of Placements","Recruiting Partners","Placements Highlights · 2026","Placements Highlights · 2027","Sports","Culture","Fees Structure","Thank You"];return titles.map((title,i)=>({id:i+1,title,tag:`KMTI • ${String(i+1).padStart(2,"0")}`,body:"",layout:"reference",notes:"Imported from the supplied KMTI Parents Presentation. Add S2S overlays, shapes, motion or speaker notes as needed.",theme:"institutional",imageData:`/templates/kmti-parents/slide-${i+1}.png`,imageDescription:`Original KMTI reference slide ${i+1}`,imageX:50,imageY:50,imageW:100,imageH:100,imageFit:"contain",imageOpacity:100,images:[],shapes:[]}))}
-function slidesForTemplate(name:string):Slide[]{if(name==="KMTI Parents Presentation")return slidesForKmtiReference();const system=templateSystems[name]||templateSystems["Visual Classroom"],institutionalImages=["Wide aerial photograph of a modern university campus in its surrounding city, clear daylight, credible institutional photography","Professional environmental portrait of an academic leader in a bright campus interior, natural expression, editorial composition","Panoramic campus buildings with a restrained milestone timeline across the lower edge","Authentic collage of classrooms, laboratories, library and collaborative learning spaces, consistent natural lighting","Students working with faculty in a modern classroom, candid documentary photography","Student clubs, sports, cultural activities and collaborative project work arranged as an energetic editorial photo mosaic","Clean evidence-led placement and outcomes visual with employer ecosystem context, corporate blue and white","Prospective students and families walking through a welcoming green campus, optimistic natural light"];return system.story.map((x,i)=>({id:i+1,title:x[0],tag:x[1],body:x[2],layout:x[3],notes:`${i===0?"Open with a confident framing question.":"Pause for the audience to process the key idea."} Adapt this ${name} slide to your subject and audience.`,theme:system.theme,...(name==="Institutional Showcase"?{imageDescription:institutionalImages[i],imageX:76,imageY:52,imageW:38,imageH:64,imageFit:"cover" as const,imageOpacity:100,aiGenerated:true}: {})}))}
-function professionalizeSlide(slide:Slide):Slide[]{
- const words=slide.body.trim().split(/\s+/).length,cleanTitle=slide.title.replace(/^\s*\d+[.)]?\s*/,"").trim();
- const base:Slide={...slide,title:cleanTitle||slide.title,selectedBlock:undefined,selectedImageId:undefined,shapes:[],titleAnimation:"fade-up",bodyAnimation:"fade-up",textAlign:"left",bodyAlign:"left"};
- const codeLine=slide.body.split("\n").findIndex(line=>/^\s*(?:<!doctype|<\/?[a-z][^>]*>)/i.test(line));
- if(slide.layout==="code"&&codeLine>=0){
-  const lines=slide.body.split("\n"),prose=lines.slice(0,codeLine).join("\n").trim(),code=lines.slice(codeLine).join("\n").trim();
-  const lead=(prose.split(/\n\n+/)[0]||`A focused example of ${cleanTitle.toLowerCase()}.`).replace(/^Definition\.\s*/i,"").slice(0,280);
-  return[
-   {...base,body:lead,layout:"content",titleX:31,titleY:34,titleW:48,titleSize:46,bodyX:31,bodyY:62,bodyW:46,bodySize:19,imageX:77,imageY:51,imageW:36,imageH:64,imageFit:"contain",motion:"subtle-reveal"},
-   {...base,id:slide.id+.1,title:`${cleanTitle} · example`,tag:"REFERENCE · CODE + OUTPUT",body:code,layout:"code",titleX:50,titleY:17,titleW:84,titleSize:34,bodyX:34,bodyY:58,bodyW:48,bodySize:13,imageData:undefined,imageDescription:"",shapes:[],motion:"progressive-build"}
+type CanvasImage = {
+  id: number;
+  src: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  opacity?: number;
+  fit?: "cover" | "contain";
+  radius?: number;
+};
+type CalloutPosition = {
+  x: number;
+  y: number;
+  arrow: "left" | "right" | "up" | "down";
+};
+type Slide = {
+  id: number;
+  title: string;
+  tag: string;
+  body: string;
+  layout: string;
+  notes: string;
+  theme?: string;
+  imageDescription?: string;
+  motion?: string;
+  imageData?: string;
+  images?: CanvasImage[];
+  background?: string;
+  shapes?: Shape[];
+  fontFamily?: string;
+  titleSize?: number;
+  bodySize?: number;
+  textColor?: string;
+  textAlign?: "left" | "center" | "right";
+  bodyAlign?: "left" | "center" | "right";
+  imageBrightness?: number;
+  imageContrast?: number;
+  imageSaturation?: number;
+  imageOpacity?: number;
+  imageFit?: "cover" | "contain";
+  selectedBlock?: "title" | "body" | "image";
+  selectedImageId?: number;
+  selectedCallout?: number;
+  codeCallouts?: CalloutPosition[];
+  titleX?: number;
+  titleY?: number;
+  titleW?: number;
+  bodyX?: number;
+  bodyY?: number;
+  bodyW?: number;
+  imageX?: number;
+  imageY?: number;
+  imageW?: number;
+  imageH?: number;
+  titleAnimation?: string;
+  bodyAnimation?: string;
+  aiGenerated?: boolean;
+  visualLesson?: VisualLessonSpec;
+};
+type SavedDeck = {
+  id: string;
+  title: string;
+  updatedAt: number;
+  slides: Slide[];
+};
+const stripDeckImages = (deck: SavedDeck): SavedDeck => ({
+  ...deck,
+  slides: deck.slides.map((slide) => ({
+    ...slide,
+    imageData: undefined,
+    images: [],
+  })),
+});
+function writeDeckIndex(decks: SavedDeck[]) {
+  try {
+    localStorage.setItem(
+      "s2s-decks",
+      JSON.stringify(decks.map(stripDeckImages)),
+    );
+  } catch {
+    try {
+      localStorage.removeItem("s2s-decks");
+      localStorage.setItem(
+        "s2s-decks",
+        JSON.stringify(decks.slice(0, 12).map(stripDeckImages)),
+      );
+    } catch {}
+  }
+}
+function deckStore() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open("s2s-studio", 1);
+    request.onupgradeneeded = () => {
+      if (!request.result.objectStoreNames.contains("decks"))
+        request.result.createObjectStore("decks", { keyPath: "id" });
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error);
+  });
+}
+async function saveDeckAssets(deck: SavedDeck) {
+  try {
+    const db = await deckStore();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction("decks", "readwrite");
+      transaction.objectStore("decks").put(deck);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+  } catch {}
+}
+async function loadDeckAssets() {
+  try {
+    const db = await deckStore();
+    const decks = await new Promise<SavedDeck[]>((resolve, reject) => {
+      const request = db.transaction("decks").objectStore("decks").getAll();
+      request.onsuccess = () => resolve(request.result || []);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    return decks;
+  } catch {
+    return [];
+  }
+}
+async function deleteDeckAssets(id: string) {
+  try {
+    const db = await deckStore();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction("decks", "readwrite");
+      transaction.objectStore("decks").delete(id);
+      transaction.oncomplete = () => resolve();
+      transaction.onerror = () => reject(transaction.error);
+    });
+    db.close();
+  } catch {}
+}
+async function compressToPng(file: File) {
+  const bitmap = await createImageBitmap(file);
+  let scale = Math.min(1, 1400 / Math.max(bitmap.width, bitmap.height)),
+    blob: Blob | null = null;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const context = canvas.getContext("2d");
+    if (!context) throw new Error("Image conversion is unavailable");
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+    if (blob && blob.size <= 1_900_000) break;
+    scale *= 0.72;
+  }
+  bitmap.close();
+  if (!blob) throw new Error("Image conversion failed");
+  if (blob.size > 2_000_000)
+    throw new Error("Image remains too large after PNG compression");
+  return blob;
+}
+async function uploadPng(file: File) {
+  const png = await compressToPng(file);
+  const response = await fetch("/api/images", {
+    method: "POST",
+    headers: { "Content-Type": "image/png" },
+    body: png,
+  });
+  const result = await response.json();
+  if (!response.ok) throw new Error(result.error || "Image upload failed");
+  const url = result.url as string;
+  const check = await fetch(url, { cache: "no-store" });
+  if (!check.ok || !check.headers.get("content-type")?.startsWith("image/"))
+    throw new Error("Image was saved but its preview could not be loaded");
+  return url;
+}
+async function syncDeck(deck: SavedDeck) {
+  try {
+    return (
+      await fetch("/api/presentations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(deck),
+      })
+    ).ok;
+  } catch {
+    return false;
+  }
+}
+const starter: Slide[] = [
+  {
+    id: 1,
+    title: "Convolutional\nNeural Networks",
+    tag: "VISUAL INTELLIGENCE • 60 MIN",
+    body: "How machines learn to see — from pixels to patterns.",
+    layout: "cover",
+    notes:
+      "Open with a question: how does a computer know there is a cat in a photo?",
+  },
+  {
+    id: 2,
+    title: "Why not a regular network?",
+    tag: "THE CORE PROBLEM",
+    body: "A 224 × 224 color image contains 150,528 values. Fully connecting them ignores where each pixel lives.",
+    layout: "number",
+    notes: "Contrast spatial awareness with a flattened list of pixels.",
+  },
+  {
+    id: 3,
+    title: "An image is a matrix",
+    tag: "01 • IMAGES AS DATA",
+    body: "Each cell stores intensity. Color images stack three matrices — red, green and blue.",
+    layout: "matrix",
+    notes: "Ask learners to identify what the brightest cells represent.",
+  },
+  {
+    id: 4,
+    title: "A tiny window,\na useful pattern",
+    tag: "02 • CONVOLUTION",
+    body: "A kernel slides across the image, multiplying and summing local values to detect edges, textures and shapes.",
+    layout: "process",
+    notes: "Use the window analogy. Spend about 4 minutes here.",
+  },
+  {
+    id: 5,
+    title: "One filter, one feature map",
+    tag: "03 • FEATURE MAPS",
+    body: "Different filters light up different evidence: edges, curves, textures, then higher-level forms.",
+    layout: "cards",
+    notes: "Emphasize that filters are learned, not hand-coded.",
+  },
+  {
+    id: 6,
+    title: "Keep the signal.\nShrink the noise.",
+    tag: "04 • POOLING",
+    body: "Max pooling preserves the strongest local activation while reducing spatial size and computation.",
+    layout: "comparison",
+    notes: "Walk through one 2×2 pooling calculation.",
+  },
+  {
+    id: 7,
+    title: "From pixels to prediction",
+    tag: "05 • ARCHITECTURE",
+    body: "Image → Convolution → ReLU → Pooling → Dense layer → Class probabilities",
+    layout: "architecture",
+    notes: "Trace one image from left to right.",
+  },
+  {
+    id: 8,
+    title: "A CNN in 7 lines",
+    tag: "06 • BUILD IT",
+    body: "model = Sequential([\n  Conv2D(32, 3, activation='relu'),\n  MaxPooling2D(),\n  Flatten(),\n  Dense(10, activation='softmax')\n])",
+    layout: "code",
+    notes: "Explain what each layer contributes.",
+  },
+  {
+    id: 9,
+    title: "Learning is an\nerror-correction loop",
+    tag: "07 • TRAINING",
+    body: "Predict → Measure loss → Backpropagate → Update filters → Repeat",
+    layout: "cycle",
+    notes: "Connect the loop to familiar feedback systems.",
+  },
+  {
+    id: 10,
+    title: "See locally.\nLearn hierarchically.",
+    tag: "SUMMARY",
+    body: "CNNs preserve spatial structure, learn reusable filters, and build complex ideas from simple visual features.",
+    layout: "summary",
+    notes: "Close with: why is convolution a better fit for images?",
+  },
+];
+function reactVisualLesson(): Slide[] {
+  return [
+    {
+      id: 1,
+      title: "React, visually",
+      tag: "VISUAL LESSON · 35 MIN",
+      body: "Learn the mental model, watch the render cycle, then build a working component.",
+      layout: "cover",
+      notes:
+        "Set the learning contract: understand the flow before memorising APIs.",
+      theme: "developer",
+      background: "#F7F9FC",
+      textColor: "#17202C",
+      motion: "subtle-reveal",
+      aiGenerated: true,
+    },
+    {
+      id: 2,
+      title: "A component is a UI function",
+      tag: "01 · THE MENTAL MODEL",
+      body: "Props enter. A description of the interface comes out.",
+      layout: "sketch",
+      notes: "Draw the input, transformation and interface in order.",
+      theme: "developer",
+      background: "#FBFCFE",
+      textColor: "#17202C",
+      motion: "diagram-sequence",
+      aiGenerated: true,
+      visualLesson: {
+        mode: "diagram",
+        eyebrow: "MENTAL MODEL",
+        diagram: {
+          showHand: true,
+          nodes: [
+            {
+              id: "props",
+              type: "box",
+              x: 17,
+              y: 50,
+              width: 20,
+              height: 22,
+              label: "Props",
+              accent: "#6B7FD7",
+              order: 1,
+            },
+            {
+              id: "component",
+              type: "box",
+              x: 50,
+              y: 50,
+              width: 24,
+              height: 28,
+              label: "Component",
+              accent: "#E85D3F",
+              order: 3,
+            },
+            {
+              id: "ui",
+              type: "box",
+              x: 83,
+              y: 50,
+              width: 20,
+              height: 22,
+              label: "UI",
+              accent: "#2F9E73",
+              order: 5,
+            },
+          ],
+          connections: [
+            { from: "props", to: "component", label: "input", order: 2 },
+            { from: "component", to: "ui", label: "returns", order: 4 },
+          ],
+        },
+      },
+    },
+    {
+      id: 3,
+      title: "State drives the render cycle",
+      tag: "02 · REACT IN MOTION",
+      body: "An event updates state. React renders a new description and commits only the required DOM changes.",
+      layout: "sketch",
+      notes: "Play the loop twice: first slowly, then at normal speed.",
+      theme: "developer",
+      background: "#FBFCFE",
+      textColor: "#17202C",
+      motion: "diagram-sequence",
+      aiGenerated: true,
+      visualLesson: {
+        mode: "diagram",
+        eyebrow: "RENDER CYCLE",
+        diagram: {
+          showHand: true,
+          nodes: [
+            {
+              id: "event",
+              type: "circle",
+              x: 15,
+              y: 50,
+              width: 18,
+              height: 28,
+              label: "Event",
+              accent: "#6B7FD7",
+              order: 1,
+            },
+            {
+              id: "state",
+              type: "box",
+              x: 39,
+              y: 50,
+              width: 19,
+              height: 24,
+              label: "State",
+              accent: "#E85D3F",
+              order: 3,
+            },
+            {
+              id: "render",
+              type: "box",
+              x: 64,
+              y: 50,
+              width: 20,
+              height: 24,
+              label: "Render",
+              accent: "#8B5CF6",
+              order: 5,
+            },
+            {
+              id: "dom",
+              type: "circle",
+              x: 88,
+              y: 50,
+              width: 18,
+              height: 28,
+              label: "DOM",
+              accent: "#2F9E73",
+              order: 7,
+            },
+          ],
+          connections: [
+            { from: "event", to: "state", order: 2 },
+            { from: "state", to: "render", order: 4 },
+            { from: "render", to: "dom", order: 6 },
+            { from: "dom", to: "event", label: "next interaction", order: 8 },
+          ],
+        },
+      },
+    },
+    {
+      id: 4,
+      title: "Build a counter component",
+      tag: "03 · CODE ALONG",
+      body: "A complete React example with state, an event and visible output.",
+      layout: "code-demo",
+      notes:
+        "Let the code type automatically. Pause when useState appears, then reveal the output.",
+      theme: "developer",
+      background: "#F7F9FC",
+      textColor: "#17202C",
+      motion: "progressive-build",
+      aiGenerated: true,
+      visualLesson: {
+        mode: "code",
+        eyebrow: "LIVE COMPONENT",
+        code: {
+          language: "React / JSX",
+          filename: "Counter.jsx",
+          typingSpeed: 18,
+          source:
+            "import { useState } from 'react';\n\nexport default function Counter() {\n  const [count, setCount] = useState(0);\n\n  return (\n    <button onClick={() => setCount(count + 1)}>\n      Count: {count}\n    </button>\n  );\n}",
+          output: "Count: 0",
+          bullets: [
+            "useState remembers a value between renders",
+            "The click handler requests the next state",
+            "React updates only what changed",
+          ],
+        },
+      },
+    },
+    {
+      id: 5,
+      title: "Data flows down",
+      tag: "04 · PROPS",
+      body: "A parent owns the data and passes focused values to its children.",
+      layout: "sketch",
+      notes: "Emphasise one-way data flow and predictable ownership.",
+      theme: "developer",
+      background: "#FBFCFE",
+      textColor: "#17202C",
+      motion: "diagram-sequence",
+      aiGenerated: true,
+      visualLesson: {
+        mode: "diagram",
+        eyebrow: "COMPONENT TREE",
+        diagram: {
+          showHand: true,
+          nodes: [
+            {
+              id: "app",
+              type: "box",
+              x: 50,
+              y: 22,
+              width: 22,
+              height: 20,
+              label: "<App />",
+              accent: "#E85D3F",
+              order: 1,
+            },
+            {
+              id: "header",
+              type: "box",
+              x: 25,
+              y: 70,
+              width: 22,
+              height: 20,
+              label: "<Header />",
+              accent: "#6B7FD7",
+              order: 3,
+            },
+            {
+              id: "card",
+              type: "box",
+              x: 50,
+              y: 70,
+              width: 22,
+              height: 20,
+              label: "<Card />",
+              accent: "#2F9E73",
+              order: 5,
+            },
+            {
+              id: "button",
+              type: "box",
+              x: 75,
+              y: 70,
+              width: 22,
+              height: 20,
+              label: "<Button />",
+              accent: "#8B5CF6",
+              order: 7,
+            },
+          ],
+          connections: [
+            { from: "app", to: "header", label: "title", order: 2 },
+            { from: "app", to: "card", label: "product", order: 4 },
+            { from: "app", to: "button", label: "action", order: 6 },
+          ],
+        },
+      },
+    },
+    {
+      id: 6,
+      title: "The React learning loop",
+      tag: "RECAP",
+      body: "Model the data flow. Build one component. Observe each render. Then compose the system.",
+      layout: "summary",
+      notes:
+        "Close by asking learners to narrate the render cycle without looking at the slide.",
+      theme: "developer",
+      background: "#17202C",
+      textColor: "#F7F9FC",
+      motion: "emphasis",
+      aiGenerated: true,
+    },
   ];
- }
- if(words>105){const paragraphs=slide.body.split(/\n\n+/).filter(Boolean),chunks:string[]=[];let chunk="";for(const paragraph of paragraphs){if((chunk+" "+paragraph).trim().split(/\s+/).length>65&&chunk){chunks.push(chunk);chunk=paragraph}else chunk+=(chunk?"\n\n":"")+paragraph}if(chunk)chunks.push(chunk);return chunks.map((body,index)=>({...base,id:slide.id+index/10,title:index?`${cleanTitle} · continued`:cleanTitle,body,layout:index?"content":slide.layout,titleX:slide.imageDescription&&!index?31:50,titleY:30,titleW:slide.imageDescription&&!index?48:82,titleSize:40,bodyX:slide.imageDescription&&!index?31:50,bodyY:60,bodyW:slide.imageDescription&&!index?46:76,bodySize:17,textAlign:slide.imageDescription&&!index?"left":"center",bodyAlign:slide.imageDescription&&!index?"left":"center",imageData:index?undefined:slide.imageData,imageDescription:index?"":slide.imageDescription,imageX:77,imageY:51,imageW:36,imageH:64,shapes:[],motion:"subtle-reveal"}))}
- if(slide.layout==="cover")return[{...base,titleX:31,titleY:43,titleW:48,titleSize:54,bodyX:31,bodyY:67,bodyW:45,bodySize:17,imageX:78,imageY:51,imageW:34,imageH:72,shapes:[]}];
- const hasVisual=Boolean(slide.imageData||slide.imageDescription);
- return[{...base,titleX:hasVisual?31:50,titleY:28,titleW:hasVisual?48:82,titleSize:Math.min(slide.titleSize||42,44),bodyX:hasVisual?31:50,bodyY:58,bodyW:hasVisual?46:74,bodySize:Math.min(slide.bodySize||18,18),imageX:77,imageY:54,imageW:36,imageH:62}];
 }
-function professionalizeDeck(slides:Slide[]){return slides.flatMap(professionalizeSlide).map((slide,index)=>({...slide,id:index+1}))}
-function Logo(){return <a className="logo" href="/" aria-label="Back to dashboard" onClick={e=>{e.preventDefault();window.dispatchEvent(new Event("s2s-dashboard"))}}><b>S2S</b><span>Studio<small>Something to show</small></span></a>}
-async function logout(){await fetch("/api/auth/logout",{method:"POST"});location.assign("/")}
-function toggleAppearance(){const dark=document.documentElement.classList.toggle("studioDark");localStorage.setItem("s2s-appearance",dark?"dark":"light")}
-export default function Studio(){
- const[view,setView]=useState<View>("home"),[brief,setBrief]=useState("Teach convolutional neural networks with practical Python examples"),[mode,setMode]=useState<string[]>(["Teaching","Coding"]),[theme,setTheme]=useState("Technical Blue"),[audience,setAudience]=useState("Engineering students"),[slides,setSlides]=useState(starter),[sel,setSel]=useState(0),[paste,setPaste]=useState(""),[error,setError]=useState(""),[tab,setTab]=useState("Copilot"),[toast,setToast]=useState(""),[deckTitle,setDeckTitle]=useState("Convolutional Neural Networks"),[deckId,setDeckId]=useState(""),[savedDecks,setSavedDecks]=useState<SavedDeck[]>([]),[history,setHistory]=useState<Slide[][]>([]),[future,setFuture]=useState<Slide[][]>([]),[syncState,setSyncState]=useState<"saved"|"saving"|"offline">("saved"),[aiLocked,setAiLocked]=useState(false);const cur=slides[sel];
- const prompt=useMemo(()=>JSON.stringify({role:"You are the autonomous creative director, presentation architect, visual designer and motion director for S2S Studio.",task:"Design the complete presentation. Make every content, layout, position, colour, image and animation decision. Return ONLY valid JSON matching response_schema. The user will not manually edit the result.",input:{topic:brief,presentation_types:mode,audience,duration_minutes:60,preferred_theme:theme},coordinate_system:"All x, y, width and height values are percentages from 0 to 100. x/y specify the element centre. Keep every element within safe margins.",rules:["Create 8–12 coherent slides with one dominant idea per slide","Use concise presentation copy, not document paragraphs","Never exceed 50 prose words on one slide","Never combine a full explanation, bullet list and complete code sample on one slide","Automatically split content when more than two conceptual layers appear","A code slide contains code plus at most three short annotations","Keep titles to two lines and section labels below eight words","Use one focal element and one supporting element per slide","Every image must explain the message rather than decorate it","Title, body, code and image bounding boxes must never overlap","Prefer three focused slides over one overloaded slide","Choose accessible colours with strong contrast","Create deliberate visual hierarchy and non-overlapping geometry","Use image_url only when you can provide a direct HTTPS image URL; otherwise use an empty string and provide a production-ready image_prompt","Animations must reinforce content importance and remain restrained","Use only the enumerated layout and animation values","Return no markdown fences, explanations or comments"],response_schema:{schema_version:"s2s-autopilot-1",title:"string",audience:"string",design_system:{theme:"studio | classroom | developer | product | executive | research | founder | editorial | lab",background:"#RRGGBB",text_color:"#RRGGBB",accent_color:"#RRGGBB",font_family:"Georgia | Arial | Helvetica | Trebuchet MS | Courier New"},slides:[{title:{text:"string",x:30,y:32,width:48,font_size:52,align:"left | center | right",animation:"fade-up | slide-left | zoom | type-in | none"},body:{text:"string",x:30,y:62,width:44,font_size:18,align:"left | center | right",animation:"fade-up | slide-left | zoom | type-in | none"},purpose:"string",layout:"cover | content | number | matrix | process | cards | comparison | architecture | code | cycle | summary",background:"#RRGGBB",visual:{image_url:"direct HTTPS URL or empty string",image_prompt:"detailed image generation prompt",x:76,y:50,width:38,height:62,fit:"cover | contain",opacity:100,animation:"fade-up | slide-left | zoom | reveal | none"},decorations:[{type:"circle | rectangle | line | symbol",symbol:"★ or empty",x:80,y:80,color:"#RRGGBB"}],slide_transition:"subtle-reveal | progressive-build | emphasis | diagram-sequence | none",speaker_notes:"string"}]}},null,2),[brief,mode,theme,audience]);
- useEffect(()=>{document.documentElement.classList.toggle("studioDark",localStorage.getItem("s2s-appearance")==="dark")},[]);
- useEffect(()=>{let active=true;(async()=>{const indexed=await loadDeckAssets();let local=indexed;try{if(!local.length)local=JSON.parse(localStorage.getItem("s2s-decks")||"[]")}catch{localStorage.removeItem("s2s-decks")}try{const response=await fetch("/api/presentations");if(response.ok){const data=await response.json(),remote:SavedDeck[]=data.decks||[],byId=new Map<string,SavedDeck>();[...remote,...local].forEach(deck=>{const current=byId.get(deck.id);if(!current||deck.updatedAt>current.updatedAt)byId.set(deck.id,deck)});const merged=[...byId.values()].sort((a,b)=>b.updatedAt-a.updatedAt);if(active){setSavedDecks(merged);writeDeckIndex(merged)}for(const deck of local)if(!remote.some(item=>item.id===deck.id&&item.updatedAt>=deck.updatedAt))void syncDeck(deck);return}}catch{}if(active)setSavedDecks(local.sort((a,b)=>b.updatedAt-a.updatedAt))})();return()=>{active=false}},[]);
- useEffect(()=>{if(!deckId)return;setSyncState("saving");const timer=setTimeout(()=>{const deck:SavedDeck={id:deckId,title:deckTitle||slides[0]?.title.replace("\n"," ")||"Untitled presentation",updatedAt:Date.now(),slides};setSavedDecks(previous=>{const next=[deck,...previous.filter(x=>x.id!==deckId)];writeDeckIndex(next);return next});void saveDeckAssets(deck);void syncDeck(deck).then(ok=>setSyncState(ok?"saved":"offline"))},650);return()=>clearTimeout(timer)},[deckId,deckTitle,slides]);
- useEffect(()=>{const home=()=>setView("home");window.addEventListener("s2s-dashboard",home);return()=>window.removeEventListener("s2s-dashboard",home)},[]);
- const flash=(x:string)=>{setToast(x);setTimeout(()=>setToast(""),2200)},update=(f:keyof Slide|"__patch",v:any)=>setSlides(a=>{setHistory(h=>[...h,a].slice(-60));setFuture([]);return a.map((s,i)=>i===sel?(f==="__patch"?{...s,...v}:{...s,[f]:v}):s)}),undo=()=>setHistory(h=>{if(!h.length)return h;const previous=h[h.length-1];setFuture(f=>[slides,...f].slice(0,60));setSlides(previous);return h.slice(0,-1)}),redo=()=>setFuture(f=>{if(!f.length)return f;const next=f[0];setHistory(h=>[...h,slides].slice(-60));setSlides(next);return f.slice(1)});
- function validate(){try{const d=JSON.parse(paste),clamp=(v:any,f:number,min=0,max=100)=>Math.max(min,Math.min(max,Number.isFinite(+v)?+v:f)),color=(v:any,f:string)=>/^#[0-9a-f]{6}$/i.test(v||"")?v:f,allowedLayouts=["cover","content","number","matrix","process","cards","comparison","architecture","code","cycle","summary"],allowedAnimations=["fade-up","slide-left","zoom","type-in","reveal","none"];if(d.schema_version!=="s2s-autopilot-1"||!d.title||!Array.isArray(d.slides)||!d.slides.length)throw new Error("Use the S2S Autopilot JSON schema from the copied prompt.");const system=d.design_system||{},a:Slide[]=d.slides.map((s:any,i:number)=>{if(!s.title?.text||!s.body?.text||!s.purpose)throw new Error(`Slide ${i+1} is missing AI title, body or purpose.`);const visual=s.visual||{},url=typeof visual.image_url==="string"&&visual.image_url.startsWith("https://")?visual.image_url:undefined,animation=(v:any,f:string)=>allowedAnimations.includes(v)?v:f,layout=allowedLayouts.includes(s.layout)?s.layout:"content";return{id:i+1,title:s.title.text,tag:typeof s.section_label==="string"&&s.section_label.trim()?s.section_label.trim():`${String(i+1).padStart(2,"0")} · ${layout.toUpperCase()}`,body:s.body.text,layout,notes:s.speaker_notes||"",theme:system.theme||"studio",background:color(s.background,color(system.background,"#f7f2e9")),textColor:color(system.text_color,"#17202c"),fontFamily:system.font_family||"Georgia",titleX:clamp(s.title.x,30),titleY:clamp(s.title.y,32),titleW:clamp(s.title.width,48,15,90),titleSize:Math.min(clamp(s.title.font_size,52,20,72),s.title.text.length>60?34:s.title.text.length>36?42:56),bodyX:clamp(s.body.x,30),bodyY:Math.max(clamp(s.body.y,62),Math.min(78,clamp(s.title.y,32)+24)),bodyW:clamp(s.body.width,44,15,90),bodySize:Math.min(clamp(s.body.font_size,18,10,32),s.body.text.length>180?13:s.body.text.length>100?16:20),textAlign:["left","center","right"].includes(s.title.align)?s.title.align:"left",bodyAlign:["left","center","right"].includes(s.body.align)?s.body.align:"left",titleAnimation:animation(s.title.animation,"fade-up"),bodyAnimation:animation(s.body.animation,"fade-up"),imageData:url,imageDescription:typeof visual.image_prompt==="string"&&!/^(none|no image|required)$/i.test(visual.image_prompt.trim())?visual.image_prompt:"",imageX:clamp(visual.x,76),imageY:clamp(visual.y,50),imageW:clamp(visual.width,38,10,100),imageH:clamp(visual.height,62,10,100),imageFit:visual.fit==="contain"?"contain":"cover",imageOpacity:clamp(visual.opacity,100,10,100),motion:s.slide_transition||visual.animation||"subtle-reveal",shapes:Array.isArray(s.decorations)?s.decorations.slice(0,8).map((shape:any,j:number)=>{const type=["circle","rectangle","line","symbol"].includes(shape.type)?shape.type:"symbol";return{id:Date.now()+i*20+j,type,glyph:type==="symbol"?(shape.symbol||"✦"):"",x:clamp(shape.x,80),y:clamp(shape.y,80),color:color(shape.color,color(system.accent_color,"#e85d3f"))}}):[],aiGenerated:true}});setSlides(professionalizeDeck(a));setDeckTitle(d.title);setDeckId(crypto.randomUUID());setAiLocked(true);setHistory([]);setFuture([]);setError("");flash("AI blueprint validated — review the complete AI direction");setTimeout(()=>setView("blueprint"),350)}catch(error){setError(error instanceof Error?error.message:"Invalid JSON. Copy the complete AI response and try again.")}}
- function saveDeck(){const id=deckId||crypto.randomUUID();setDeckId(id);const deck:SavedDeck={id,title:deckTitle||slides[0]?.title.replace("\n"," ")||"Untitled presentation",updatedAt:Date.now(),slides};setSavedDecks(previous=>{const next=[deck,...previous.filter(x=>x.id!==id)];writeDeckIndex(next);return next});void saveDeckAssets(deck);void syncDeck(deck).then(ok=>flash(ok?"Presentation synced across systems":"Saved locally — sync will retry automatically"))}
- async function deleteDeck(deck:SavedDeck){if(!confirm(`Delete “${deck.title}”? This removes it from every synced system.`))return;try{const response=await fetch("/api/presentations",{method:"DELETE",headers:{"Content-Type":"application/json"},body:JSON.stringify({id:deck.id})});if(!response.ok)throw new Error();const next=savedDecks.filter(item=>item.id!==deck.id);setSavedDecks(next);writeDeckIndex(next);await deleteDeckAssets(deck.id);if(deckId===deck.id)setDeckId("");flash("Presentation deleted from all systems")}catch{flash("Could not delete presentation — please try again")}}
- function openDeck(deck:SavedDeck){setDeckId(deck.id);setDeckTitle(deck.title);setSlides(deck.slides);setAiLocked(deck.slides.every(slide=>slide.aiGenerated));setSel(0);setView("edit")}
- useEffect(()=>{const k=(e:KeyboardEvent)=>{if(view!=="present")return;if(e.key==="ArrowRight"||e.key===" ")setSel(x=>Math.min(slides.length-1,x+1));if(e.key==="ArrowLeft")setSel(x=>Math.max(0,x-1));if(e.key==="Escape")setView("edit")};addEventListener("keydown",k);return()=>removeEventListener("keydown",k)},[view,slides.length]);
- useEffect(()=>{const key=(e:KeyboardEvent)=>{if(view!=="edit"||aiLocked)return;const target=e.target as HTMLElement;if(target.matches("input,textarea,select")||target.isContentEditable)return;if((e.metaKey||e.ctrlKey)&&e.key.toLowerCase()==="z"){e.preventDefault();e.shiftKey?redo():undo();return}if(!["ArrowLeft","ArrowRight","ArrowUp","ArrowDown","Backspace","Delete"].includes(e.key))return;const amount=e.shiftKey?5:1,dx=e.key==="ArrowLeft"?-amount:e.key==="ArrowRight"?amount:0,dy=e.key==="ArrowUp"?-amount:e.key==="ArrowDown"?amount:0;if((e.key==="Backspace"||e.key==="Delete")&&cur.selectedImageId){e.preventDefault();update("__patch",{images:(cur.images||[]).filter(image=>image.id!==cur.selectedImageId),selectedImageId:undefined});return}if(!dx&&!dy)return;e.preventDefault();if(cur.selectedImageId)update("images",(cur.images||[]).map(image=>image.id===cur.selectedImageId?{...image,x:Math.max(0,Math.min(100,image.x+dx)),y:Math.max(0,Math.min(100,image.y+dy))}:image));else if(cur.selectedBlock==="title")update("__patch",{titleX:(cur.titleX??30)+dx,titleY:(cur.titleY??35)+dy});else if(cur.selectedBlock==="body")update("__patch",{bodyX:(cur.bodyX??29)+dx,bodyY:(cur.bodyY??62)+dy});else if(cur.selectedBlock==="image")update("__patch",{imageX:(cur.imageX??76)+dx,imageY:(cur.imageY??50)+dy})};addEventListener("keydown",key);return()=>removeEventListener("keydown",key)},[view,cur,undo,redo,aiLocked]);
- if(view==="present")return <div className="present"><div className="presentNav"><button onClick={()=>setView("home")}>⌂ Dashboard</button><button onClick={()=>setView("edit")}>× Exit presentation</button></div><div className="presentSlide"><SlideView key={cur.id} s={cur}/></div><div className="controls"><button disabled={!sel} onClick={()=>setSel(sel-1)}>←</button><span>{sel+1} / {slides.length}</span><button disabled={sel===slides.length-1} onClick={()=>setSel(sel+1)}>→</button><span>00:{String((sel+1)*3).padStart(2,"0")}</span></div></div>;
- function useTemplate(name:string){setSlides(slidesForTemplate(name));setAiLocked(false);setDeckTitle(name);setDeckId(crypto.randomUUID());setSel(0);flash(`${name} story system applied`);setView("edit")}
- return <main>{toast&&<div className="toast">✓ {toast}</div>}{view==="home"&&<Home create={()=>setView("create")} open={()=>setView("edit")} templates={()=>setView("templates")} savedDecks={savedDecks} openDeck={openDeck} deleteDeck={deleteDeck}/>}
- {view==="templates"&&<Templates home={()=>setView("home")} create={()=>setView("create")} useTemplate={useTemplate}/>}
- {view==="create"&&<Create brief={brief} setBrief={setBrief} mode={mode} setMode={setMode} theme={theme} setTheme={setTheme} audience={audience} setAudience={setAudience} back={()=>setView("home")} next={()=>setView("bridge")}/>}
- {view==="bridge"&&<Bridge prompt={prompt} paste={paste} setPaste={setPaste} error={error} back={()=>setView("create")} copy={()=>{navigator.clipboard?.writeText(prompt);flash("Prompt copied — paste it into ChatGPT")}} demo={()=>setPaste(JSON.stringify({title:"Convolutional Neural Networks",audience,theme:{name:theme,palette:["#17202c","#e85d3f","#f7f2e9"],typography:"Editorial serif with neutral sans",image_style:"Clean technical editorial"},objectives:["Build visual intuition","Apply the concept in code"],slides:starter.map(s=>({title:s.title,purpose:s.tag,layout:s.layout,key_message:s.body,image_description:`Professional editorial illustration for ${s.title.replace("\n"," ")}, clean ${theme} palette, generous negative space, no text or watermark`,motion:s.layout==="architecture"?"diagram sequence":"subtle reveal",speaker_notes:s.notes}))},null,2))} validate={validate}/>}
- {view==="blueprint"&&<Blueprint aiLocked={aiLocked} slides={slides} setSlides={setSlides} back={()=>setView("bridge")} next={()=>setView("edit")}/>}
- {view==="edit"&&<Editor aiLocked={aiLocked} title={deckTitle} slides={slides} sel={sel} setSel={setSel} cur={cur} update={update} tab={tab} setTab={setTab} blueprint={()=>setView("blueprint")} save={saveDeck} present={()=>setView("present")} add={()=>{setSlides([...slides,{id:slides.length+1,title:"Untitled idea",tag:"NEW SLIDE",body:"Start with one clear message.",layout:"content",notes:"",shapes:[]}]);setSel(slides.length)}} flash={flash} undo={undo} redo={redo} canUndo={!!history.length} canRedo={!!future.length} syncState={syncState}/>}</main>}
-function Side({active="Home",home,templates}:{active?:string;home?:()=>void;templates?:()=>void}){const[accountOpen,setAccountOpen]=useState(false);return <aside className="side"><Logo/><div className="workspaceSwitch"><span>PERSONAL WORKSPACE</span><button>Srikanth’s studio <b>⌄</b></button></div><nav><small>WORKSPACE</small><button className={active==="Home"?"on":""} onClick={home}>⌂ <span>Home</span></button><button className={active==="Templates"?"on":""} onClick={templates}>◇ <span>Templates</span><em>24</em></button><button>✦ <span>Brand kit</span></button><button>▧ <span>Assets</span></button></nav><footer><div className="upgrade"><small>FREE PLAN</small><b>Unlock your full studio</b><span>More exports, themes and storage.</span><button>View plans →</button></div><div className="accountWrap">{accountOpen&&<div className="accountMenu"><header><i>SR</i><span><b>Srikanth</b><small>srikanth@s2s.studio</small></span></header><div><button onClick={toggleAppearance}><i>◐</i><span>Appearance</span><kbd>Toggle theme</kbd></button><button><i>♢</i><span>Notifications</span><em>1 new</em></button><button><i>⚙</i><span>Account settings</span><b>→</b></button></div><footer><button onClick={logout}><i>↪</i><span>Logout</span></button></footer></div>}<button className={accountOpen?"user accountOpen":"user"} onClick={()=>setAccountOpen(!accountOpen)} aria-expanded={accountOpen}><i>SR</i><span><b>Srikanth</b><small>Personal workspace</small></span><em>{accountOpen?"⌄":"•••"}</em></button></div></footer></aside>}
-function Home({create,open,templates,savedDecks,openDeck,deleteDeck}:{create:()=>void;open:()=>void;templates:()=>void;savedDecks:SavedDeck[];openDeck:(d:SavedDeck)=>void;deleteDeck:(d:SavedDeck)=>void}){const samples=[["Convolutional Neural Networks","Teaching · 10 slides","CNNs","coral"],["React Hooks Workshop","Workshop · 18 slides","useEffect( )","navy"],["AI Product Launch","Marketing · 12 slides","Make it matter.","lime"]];return <><Side active="Home" home={()=>{}} templates={templates}/><section className="home"><div className="homeBody"><div className="welcome"><div><small>YOUR PRESENTATION STUDIO</small><h1>Good evening, Srikanth.</h1><p>Turn your next idea into something worth showing.</p></div><button className="primary" onClick={create}><span>＋</span> Create presentation <em>⌘ N</em></button></div><div className="dashboardSearch search">⌕ <input placeholder="Search your presentations and templates" aria-label="Search presentations and templates"/><kbd>⌘ K</kbd></div><Title over="PICK UP WHERE YOU LEFT OFF" title="Recent presentations"/><div className="cards">{savedDecks.map((d,i)=><article className="savedCard" key={d.id}><button className="savedCardOpen" onClick={()=>openDeck(d)}><div className={`cover ${["navy","coral","violet","lime"][i%4]}`}><small>SAVED • {String(d.slides.length).padStart(2,"0")} SLIDES</small><b>{d.title.slice(0,28)}</b><span>Open in presentation editor</span><i className="coverBadge">S2S</i></div><div className="meta"><b>{d.title}</b><span>•••</span><small>{d.slides.length} slides</small><small>Saved {new Date(d.updatedAt).toLocaleDateString()}</small></div></button><button className="deletePresentation" onClick={()=>deleteDeck(d)} title="Delete presentation" aria-label={`Delete ${d.title}`}>⌫</button></article>)}{samples.slice(0,Math.max(1,4-savedDecks.length)).map((c,i)=><button key={c[0]} onClick={i?undefined:open}><div className={`cover ${c[3]}`}><small>STORY • 0{i+1}</small><b>{c[2]}</b><span>Something worth showing</span><i className="coverBadge">{i===0?"EDU":i===1?"DEV":"MKT"}</i></div><div className="meta"><b>{c[0]}</b><span>•••</span><small>{c[1]}</small><small>Example presentation</small></div></button>)}</div><div className="homeGrid"><section><Title title="Start with a format"/><div className="formats">{modes.slice(0,6).map((x,i)=><button key={x} onClick={create}><i>{["◎","</>","↗","▦","⌁","✣"][i]}</i><b>{x}</b><span>→</span></button>)}</div></section><section className="ideas"><small>✦ AI IDEAS</small><h2>A little spark?</h2><p>Start with a thought. S2S will shape the story.</p>{["Turn course notes into a lecture","Create a hands-on coding workshop","Transform a report into a story"].map(x=><button onClick={create} key={x}>{x}<span>↗</span></button>)}</section></div></div></section></>}
-function Templates({home,create,useTemplate}:{home:()=>void;create:()=>void;useTemplate:(x:string)=>void}){
- const[filter,setFilter]=useState("All");
- const list=[
-  ["Visual Classroom","Teaching","Explain complex ideas with diagrams and progressive reveals.","coral","10"],
-  ["Developer Workshop","Coding","Code-first lessons with exercises and architecture flows.","navy","14"],
-  ["Product Narrative","Marketing","A confident launch story built around one memorable idea.","lime","12"],
-  ["Institutional Showcase","Marketing","Campus story, programs, student experience and outcomes with evidence-led visual storytelling.","campus","8"],
-  ["KMTI Parents Presentation","Marketing","Complete 38-slide reference presentation, preserved for editing and presenting inside S2S Studio.","campus","38"],
-  ["Executive Review","Business","Crisp performance updates, decisions and next actions.","violet","16"],
-  ["Research Brief","Research","Evidence-led findings with methodology and conclusions.","paper","13"],
-  ["Founder Pitch","Pitch Deck","Problem, opportunity, traction and an investable vision.","midnight","11"],
-  ["Editorial Keynote","Professional","Large ideas, elegant pacing and cinematic whitespace.","sand","9"],
-  ["Hands-on Lab","Workshop","Teach, demonstrate, practice and reflect in each chapter.","blue","15"]
- ];
- const shown=filter==="All"?list:list.filter(x=>x[1]===filter);
- return <><Side active="Templates" home={home} templates={()=>{}}/><section className="home templatePage"><header><div className="search">⌕ <input placeholder="Search templates"/><kbd>⌘ K</kbd></div><button>◐</button><i>SR</i></header><div className="templateBody"><div className="templateHero"><div><small>CURATED BY S2S</small><h1>Start with a story<br/>system, not a blank slide.</h1><p>Professionally structured templates with smart layouts and content-aware motion.</p></div><button className="primary" onClick={create}>＋ Create from scratch</button></div><div className="templateFilters">{["All","Teaching","Coding","Marketing","Business","Research","Pitch Deck","Workshop"].map(x=><button className={filter===x?"on":""} onClick={()=>setFilter(x)} key={x}>{x}</button>)}</div><div className="templateGrid">{shown.map((t,i)=><article className="templateCard" key={t[0]}><div className={`templatePreview ${t[3]}`}><div className="templateChrome"><span>S2S</span><small>0{i+1}</small></div><b>{t[0]}</b><p>{t[1]}</p><i>{i%3===0?"◯":i%3===1?"〈 / 〉":"↗"}</i><button onClick={()=>useTemplate(t[0])}>Use template →</button></div><div className="templateInfo"><span><b>{t[0]}</b><small>{t[1]} · {t[4]} slides</small></span><button onClick={()=>useTemplate(t[0])}>＋</button></div><p>{t[2]}</p></article>)}</div></div></section></>
+const modes = [
+  "Teaching",
+  "Coding",
+  "Visual lesson",
+  "Marketing",
+  "Business",
+  "Professional",
+  "Workshop",
+  "Research",
+];
+const templateSystems: Record<
+  string,
+  { theme: string; story: [string, string, string, string][] }
+> = {
+  "Visual Classroom": {
+    theme: "classroom",
+    story: [
+      [
+        "Make the invisible\nvisible",
+        "TEACHING STORY • 45 MIN",
+        "A visual lesson about turning difficult ideas into memorable mental models.",
+        "cover",
+      ],
+      [
+        "Start with what\nthey already know",
+        "01 • PRIOR KNOWLEDGE",
+        "Anchor every new concept to a familiar object, action or experience.",
+        "number",
+      ],
+      [
+        "One idea,\none diagram",
+        "02 • VISUAL MODEL",
+        "Remove decoration. Keep only the parts that explain how the idea works.",
+        "matrix",
+      ],
+      [
+        "Reveal complexity\nin layers",
+        "03 • PROGRESSIVE DISCLOSURE",
+        "Show the foundation first, then introduce one meaningful relationship at a time.",
+        "process",
+      ],
+      [
+        "Check for\nunderstanding",
+        "04 • ACTIVE RECALL",
+        "Ask learners to predict, explain and apply—not simply repeat.",
+        "cycle",
+      ],
+      [
+        "Clarity creates\nconfidence",
+        "TAKEAWAY",
+        "Teach from familiar to new, concrete to abstract, and simple to connected.",
+        "summary",
+      ],
+    ],
+  },
+  "Developer Workshop": {
+    theme: "developer",
+    story: [
+      [
+        "Build a reliable\nAPI client",
+        "HANDS-ON ENGINEERING • 90 MIN",
+        "From first request to production-ready retries, validation and observability.",
+        "cover",
+      ],
+      [
+        "Define the contract\nfirst",
+        "01 • INTERFACE",
+        "Make inputs, outputs and failure states explicit before implementation begins.",
+        "architecture",
+      ],
+      [
+        "The smallest\nworking request",
+        "02 • CODE ALONG",
+        "const response = await fetch(url, { headers });\nif (!response.ok) throw new ApiError(response);",
+        "code",
+      ],
+      [
+        "Failures are\npart of the design",
+        "03 • RESILIENCE",
+        "Timeout → Retry with jitter → Circuit break → Useful fallback",
+        "process",
+      ],
+      [
+        "Test behavior,\nnot implementation",
+        "04 • PRACTICE",
+        "Validate success, malformed data, slow networks and authentication failures.",
+        "comparison",
+      ],
+      [
+        "Ship with\nconfidence",
+        "WORKSHOP RECAP",
+        "A strong client is typed, observable, resilient and easy to change.",
+        "summary",
+      ],
+    ],
+  },
+  "Product Narrative": {
+    theme: "product",
+    story: [
+      [
+        "Make the new way\nfeel inevitable",
+        "PRODUCT LAUNCH • NARRATIVE",
+        "A customer-centered story from daily friction to a distinctly better future.",
+        "cover",
+      ],
+      [
+        "The cost of\ntoday's workaround",
+        "01 • TENSION",
+        "Teams lose 11 hours each week switching tools, rebuilding context and chasing decisions.",
+        "number",
+      ],
+      [
+        "Meet the moment\nthat matters",
+        "02 • CUSTOMER",
+        "The breakthrough is not another feature—it is a faster path from intent to outcome.",
+        "cards",
+      ],
+      [
+        "One flow.\nZero handoffs.",
+        "03 • EXPERIENCE",
+        "Capture → Understand → Create → Share",
+        "process",
+      ],
+      [
+        "Why we win\nnow",
+        "04 • DIFFERENTIATION",
+        "Less setup. Smarter defaults. A result users can trust on the first attempt.",
+        "comparison",
+      ],
+      [
+        "From busywork\nto momentum",
+        "LAUNCH PROMISE",
+        "Give every team more time for the work only they can do.",
+        "summary",
+      ],
+    ],
+  },
+  "Executive Review": {
+    theme: "executive",
+    story: [
+      [
+        "Q3 Business\nReview",
+        "EXECUTIVE BRIEF • CONFIDENTIAL",
+        "Performance, decisions and the three moves that matter next.",
+        "cover",
+      ],
+      [
+        "Growth is healthy—\nquality improved",
+        "01 • SCORECARD",
+        "84% of plan achieved with margin expanding and retention at a twelve-month high.",
+        "number",
+      ],
+      [
+        "What moved\nthe business",
+        "02 • DRIVERS",
+        "Enterprise expansion offset slower acquisition in the mid-market segment.",
+        "comparison",
+      ],
+      [
+        "Three decisions\nneeded today",
+        "03 • DECISIONS",
+        "Approve hiring sequence. Protect platform investment. Focus the launch market.",
+        "cards",
+      ],
+      [
+        "Next quarter's\noperating path",
+        "04 • FORWARD PLAN",
+        "Stabilize → Scale → Expand → Measure",
+        "architecture",
+      ],
+      [
+        "Focused execution.\nMeasured growth.",
+        "EXECUTIVE CLOSE",
+        "Align resources behind the highest-confidence path to durable growth.",
+        "summary",
+      ],
+    ],
+  },
+  "Research Brief": {
+    theme: "research",
+    story: [
+      [
+        "What changes\nwhen AI assists?",
+        "RESEARCH BRIEF • 2026",
+        "A controlled study of decision quality, speed and confidence in knowledge work.",
+        "cover",
+      ],
+      [
+        "The research\nquestion",
+        "01 • HYPOTHESIS",
+        "Does structured AI assistance improve outcomes without increasing overconfidence?",
+        "number",
+      ],
+      [
+        "A balanced\nstudy design",
+        "02 • METHOD",
+        "240 participants across four roles, randomized into assisted and control cohorts.",
+        "matrix",
+      ],
+      [
+        "Signal over\nnoise",
+        "03 • FINDINGS",
+        "Assisted teams were faster and more consistent; expert review remained essential.",
+        "comparison",
+      ],
+      [
+        "What the evidence\nsupports",
+        "04 • INTERPRETATION",
+        "Use AI for exploration and structure. Keep accountable judgment with people.",
+        "cards",
+      ],
+      [
+        "Augment decisions.\nPreserve agency.",
+        "CONCLUSION",
+        "The best systems improve both capability and calibration.",
+        "summary",
+      ],
+    ],
+  },
+  "Founder Pitch": {
+    theme: "founder",
+    story: [
+      [
+        "Infrastructure for\nthe idea economy",
+        "SEED ROUND • 2026",
+        "S2S turns raw expertise into presentations people understand and remember.",
+        "cover",
+      ],
+      [
+        "Great ideas are\nlost in bad slides",
+        "01 • PROBLEM",
+        "73% of knowledge workers spend more time formatting than shaping the story.",
+        "number",
+      ],
+      [
+        "From thought\nto narrative",
+        "02 • SOLUTION",
+        "Brief → Intelligent blueprint → Professional deck → Confident delivery",
+        "architecture",
+      ],
+      [
+        "A workflow users\nalready understand",
+        "03 • PRODUCT",
+        "Bring any idea. Keep control. Leave with something worth showing.",
+        "process",
+      ],
+      [
+        "A focused path\nto scale",
+        "04 • TRACTION",
+        "Education proves engagement. Teams unlock expansion. Enterprise compounds value.",
+        "cards",
+      ],
+      [
+        "Help every idea\nland",
+        "THE ASK",
+        "Partner with us to build the presentation layer for human knowledge.",
+        "summary",
+      ],
+    ],
+  },
+  "Editorial Keynote": {
+    theme: "editorial",
+    story: [
+      [
+        "Attention is\na design material",
+        "EDITORIAL KEYNOTE • 30 MIN",
+        "What great storytellers understand about rhythm, restraint and revelation.",
+        "cover",
+      ],
+      [
+        "Silence gives\nideas weight",
+        "ACT I • RESTRAINT",
+        "Whitespace is not empty. It gives the audience room to notice what matters.",
+        "content",
+      ],
+      [
+        "One unforgettable\nnumber",
+        "ACT II • EMPHASIS",
+        "3 seconds: the time an audience needs to decide whether to keep listening.",
+        "number",
+      ],
+      [
+        "Contrast creates\nmeaning",
+        "ACT III • RHYTHM",
+        "Quiet before loud. Detail before scale. Question before answer.",
+        "comparison",
+      ],
+      [
+        "Build toward\nthe turn",
+        "ACT IV • REVELATION",
+        "Every section should change how the audience understands the opening idea.",
+        "process",
+      ],
+      [
+        "Design what they\nremember",
+        "FINALE",
+        "A keynote succeeds when its central thought keeps moving after the room is empty.",
+        "summary",
+      ],
+    ],
+  },
+  "Hands-on Lab": {
+    theme: "lab",
+    story: [
+      [
+        "Prototype an AI\nfeature in 60 minutes",
+        "GUIDED LAB • BUILD TO LEARN",
+        "A practical session with short concepts, live building and reflection checkpoints.",
+        "cover",
+      ],
+      [
+        "Define the job\nbefore the model",
+        "01 • FRAME",
+        "Write one user, one situation and one observable successful outcome.",
+        "process",
+      ],
+      [
+        "Create the first\nprompt contract",
+        "02 • BUILD",
+        "{ role: 'coach', input, constraints, output_schema }",
+        "code",
+      ],
+      [
+        "Test the edges,\nnot the happy path",
+        "03 • EXPERIMENT",
+        "Compare vague, incomplete and conflicting inputs before polishing the UI.",
+        "comparison",
+      ],
+      [
+        "Observe. Adjust.\nRun again.",
+        "04 • ITERATE",
+        "Prototype → Test → Inspect → Improve",
+        "cycle",
+      ],
+      [
+        "Small loops create\nstrong systems",
+        "LAB RECAP",
+        "Leave with one working flow, three learned constraints and a clear next experiment.",
+        "summary",
+      ],
+    ],
+  },
+  "Institutional Showcase": {
+    theme: "institutional",
+    story: [
+      [
+        "A campus built\nfor what comes next",
+        "INSTITUTIONAL PROFILE • MARKETING",
+        "A confident introduction to the institution, its learning environment and the outcomes families value.",
+        "cover",
+      ],
+      [
+        "A legacy that keeps\nmoving forward",
+        "01 • OUR STORY",
+        "Milestones, academic growth and industry relevance presented as one credible institutional journey.",
+        "process",
+      ],
+      [
+        "Infrastructure that\nsupports ambition",
+        "02 • CAMPUS EXPERIENCE",
+        "Purpose-built classrooms, laboratories, libraries and collaborative spaces make learning visible and tangible.",
+        "matrix",
+      ],
+      [
+        "Programs aligned\nwith opportunity",
+        "03 • ACADEMICS",
+        "Clear pathways connect foundational learning, specialist programs, research exposure and career readiness.",
+        "cards",
+      ],
+      [
+        "Learning extends\nbeyond the classroom",
+        "04 • STUDENT EXPERIENCE",
+        "Mentorship, projects, clubs, sports and cultural experiences help students build confidence and capability.",
+        "comparison",
+      ],
+      [
+        "Evidence families\ncan evaluate",
+        "05 • OUTCOMES",
+        "Show placement reach, employer participation, progression and student achievement with transparent proof.",
+        "number",
+      ],
+      [
+        "Industry connection\nis part of the system",
+        "06 • PARTNERSHIPS",
+        "Research, internships, capstone projects and employer engagement turn academic learning into professional momentum.",
+        "architecture",
+      ],
+      [
+        "Choose a place\nwhere potential grows",
+        "ADMISSIONS • NEXT STEP",
+        "Invite families to visit, ask questions and see the learning environment for themselves.",
+        "summary",
+      ],
+    ],
+  },
+};
+function slidesForKmtiReference(): Slide[] {
+  const titles = [
+    "Keshav Memorial Technological Institute",
+    "Presentation by Shri Neil Gogte",
+    "Institutional journey",
+    "Campus Infrastructure",
+    "Campus Infrastructure · Facilities",
+    "Bhavishya Dwar",
+    "Market Trends",
+    "Why Deemed to be University?",
+    "Campus Experience",
+    "Learning Frameworks",
+    "Classroom Reimagined",
+    "Faculty and Mentorship",
+    "Academic Programs",
+    "Academic Programs · Postgraduate",
+    "Capstone Projects",
+    "Student Learning Spaces",
+    "Student Life",
+    "Technology Enabled Learning",
+    "Technology Ecosystem",
+    "K-HUB Incubation Forum",
+    "High Impact Research",
+    "String of Pearls",
+    "Research Paradigms",
+    "Research Labs and Programs",
+    "Defence Research Projects",
+    "CyberGuard 360, USA",
+    "SyncSilica, USA",
+    "IIT Madras BS Degree Program",
+    "Student Success Model",
+    "KMTI Learning Path",
+    "AI and the Future of Placements",
+    "Recruiting Partners",
+    "Placements Highlights · 2026",
+    "Placements Highlights · 2027",
+    "Sports",
+    "Culture",
+    "Fees Structure",
+    "Thank You",
+  ];
+  return titles.map((title, i) => ({
+    id: i + 1,
+    title,
+    tag: `KMTI • ${String(i + 1).padStart(2, "0")}`,
+    body: "",
+    layout: "reference",
+    notes:
+      "Imported from the supplied KMTI Parents Presentation. Add S2S overlays, shapes, motion or speaker notes as needed.",
+    theme: "institutional",
+    imageData: `/templates/kmti-parents/slide-${i + 1}.png`,
+    imageDescription: `Original KMTI reference slide ${i + 1}`,
+    imageX: 50,
+    imageY: 50,
+    imageW: 100,
+    imageH: 100,
+    imageFit: "contain",
+    imageOpacity: 100,
+    images: [],
+    shapes: [],
+  }));
 }
-function Title({over,title}:{over?:string,title:string}){return <div className="title">{over&&<small>{over}</small>}<h2>{title}</h2><button>View all →</button></div>}
-function Top({back}:{back:()=>void}){return <header className="top"><Logo/><button onClick={back}>← Back</button></header>}
-function Create({brief,setBrief,mode,setMode,theme,setTheme,audience,setAudience,back,next}:any){const themes=[["Modern Coral","#ef6b43","#fff4ef"],["Technical Blue","#7189e8","#172033"],["Fresh Lime","#d6e872","#304016"],["Executive Violet","#9277d2","#272034"],["Research Paper","#b79a78","#f0e9dd"],["Midnight","#182132","#79a8ff"],["Editorial Sand","#d9b995","#5d402f"],["Workshop Sky","#b8dbea","#25758f"]];const toggle=(x:string)=>setMode(mode.includes(x)?mode.filter((v:string)=>v!==x):[...mode,x]);return <><Top back={back}/><div className="create createFlow"><small>01 / 03 · CREATIVE DIRECTION</small><h1>Design the story<br/>before the <em>slides.</em></h1><p>Choose a visual voice, describe the topic, then combine the presentation approaches you need.</p><section className="creationSection"><div className="creationHeading"><i>1</i><span><b>Choose a visual theme</b><small>Palette, typography and image direction stay consistent across the deck.</small></span></div><div className="themeChoices">{themes.map(t=><button className={theme===t[0]?"on":""} onClick={()=>setTheme(t[0])} key={t[0]}><i style={{background:`linear-gradient(135deg,${t[1]} 0 52%,${t[2]} 52%)`}}/><span><b>{t[0]}</b><small>{t[1]} · {t[2]}</small></span><em>{theme===t[0]?"✓":""}</em></button>)}</div></section><section className="creationSection"><div className="creationHeading"><i>2</i><span><b>Describe your topic</b><small>Include the subject, desired outcome and any must-cover ideas.</small></span></div><div className="brief"><textarea value={brief} onChange={e=>setBrief(e.target.value)} placeholder="Example: Teach convolutional neural networks with practical Python examples…"/><footer><span>{brief.length} characters · AI uses this as the source brief</span></footer></div></section><section className="creationSection"><div className="creationHeading"><i>3</i><span><b>Combine presentation types</b><small>Select one or several. S2S will blend their strengths into one coherent narrative.</small></span></div><div className="pills multiPills">{modes.map(x=><button className={mode.includes(x)?"on":""} onClick={()=>toggle(x)} key={x}>{mode.includes(x)?"✓ ":"＋ "}{x}</button>)}</div></section><section className="creationSection audienceSection"><div className="creationHeading"><i>4</i><span><b>Choose the audience</b><small>Content depth, terminology and examples will adapt automatically.</small></span></div><div className="audienceGrid">{["General audience","School students","University students","Engineering students","Developers & architects","Executives & leaders","Customers & prospects","Researchers & academics"].map(x=><button className={audience===x?"on":""} onClick={()=>setAudience(x)} key={x}>{x}<span>{audience===x?"✓":""}</span></button>)}</div></section><footer className="createAction"><span><b>{theme}</b><small>{mode.length?mode.join(" + "):"Choose at least one type"} · {audience}</small></span><button className="primary" disabled={!brief.trim()||!mode.length} onClick={next}>Create AI prompt →</button></footer></div></>}
-function Bridge({prompt,paste,setPaste,error,back,copy,demo,validate}:any){return <><Top back={back}/><div className="bridge"><small>02 / 03 · AI HANDOFF</small><h1>Bring the intelligence.<br/><em>Keep the control.</em></h1><p>No API key needed. Copy our prompt to ChatGPT, then paste its JSON answer back. S2S renders every AI decision automatically.</p><div className="handoff"><section><i>1</i><header><span><b>Copy the JSON prompt</b><small>Structured for reliable output</small></span><button onClick={copy}>⧉ Copy JSON</button></header><pre>{prompt}</pre><a href="https://chatgpt.com" target="_blank">Open ChatGPT ↗</a></section><strong>→</strong><section><i>2</i><header><span><b>Paste ChatGPT or Claude response</b><small>Validated, then rendered without editing</small></span><button onClick={demo}>Use demo</button></header><textarea value={paste} onChange={e=>setPaste(e.target.value)} placeholder={'Paste JSON here…\n\n{ "title": "…", "slides": […] }'}/>{error&&<p className="error">{error}</p>}<button className="primary" disabled={!paste} onClick={validate}>Validate & let AI build the show →</button></section></div><footer>◈ Your AI JSON is validated locally, then the presentation syncs securely across your S2S systems.</footer></div></>}
-function Blueprint({aiLocked,slides,setSlides,back,next}:any){const[preview,setPreview]=useState<number|null>(null),[jsonSlide,setJsonSlide]=useState<number|null>(null),[jsonText,setJsonText]=useState(""),[jsonError,setJsonError]=useState(""),[regenReady,setRegenReady]=useState(false),openJson=(i:number,regenerate=false)=>{setJsonSlide(i);setJsonText(JSON.stringify(slides[i],null,2));setJsonError("");setRegenReady(regenerate)},regenerate=(i:number)=>{const slide=slides[i],instruction={role:"Expert S2S slide director",task:"Regenerate this single slide. Improve clarity, visual hierarchy, image direction and animation. Return only one valid JSON object using exactly the same keys and value types as current_slide. Keep coordinates as percentages and prevent overlaps.",current_slide:slide};navigator.clipboard?.writeText(JSON.stringify(instruction,null,2));openJson(i,true)},applyJson=()=>{try{if(jsonSlide===null)return;const parsed=JSON.parse(jsonText);if(!parsed||typeof parsed.title!=="string"||typeof parsed.body!=="string"||!parsed.title.trim()||!parsed.body.trim())throw new Error("Slide JSON requires non-empty title and body strings.");if(parsed.imageData&&!(String(parsed.imageData).startsWith("https://")||String(parsed.imageData).startsWith("/api/images/")))throw new Error("imageData must be an HTTPS URL or an uploaded S2S image URL.");const current=slides[jsonSlide],next={...current,...parsed,id:current.id,aiGenerated:current.aiGenerated,shapes:Array.isArray(parsed.shapes)?parsed.shapes.slice(0,8):current.shapes,images:Array.isArray(parsed.images)?parsed.images.slice(0,8):current.images};setSlides((all:Slide[])=>all.map((slide:Slide,index:number)=>index===jsonSlide?next:slide));setJsonSlide(null);setJsonError("");setRegenReady(false)}catch(error){setJsonError(error instanceof Error?error.message:"Invalid slide JSON.")}},professionalize=(i:number)=>setSlides((all:Slide[])=>[...all.slice(0,i),...professionalizeSlide(all[i]),...all.slice(i+1)].map((slide,index)=>({...slide,id:index+1}))),upload=async(i:number,file?:File)=>{if(!file)return;try{const imageData=await uploadPng(file);setSlides((current:Slide[])=>current.map((s:Slide,j:number)=>j===i?{...s,imageData}:s))}catch(error){alert(error instanceof Error?error.message:"Image upload failed")}};return <>{preview!==null&&slides[preview]&&<div className="blueprintFullscreen" role="dialog" aria-modal="true"><header><span><b>Slide {preview+1}</b><small>{slides[preview].tag}</small></span><button onClick={()=>setPreview(null)}>× Close</button></header><div><SlideView s={slides[preview]}/></div><footer><button disabled={!preview} onClick={()=>setPreview(Math.max(0,preview-1))}>← Previous</button><span>{preview+1} / {slides.length}</span><button disabled={preview===slides.length-1} onClick={()=>setPreview(Math.min(slides.length-1,preview+1))}>Next →</button></footer></div>}{jsonSlide!==null&&<div className="slideJsonModal" role="dialog" aria-modal="true"><section><header><span><small>{regenReady?"REGENERATION PROMPT COPIED":"SLIDE JSON"}</small><h2>{regenReady?"Paste the regenerated slide":"Edit slide JSON"}</h2></span><button onClick={()=>setJsonSlide(null)}>×</button></header>{regenReady&&<p>Paste this slide into ChatGPT or Claude, then replace the JSON below with its single-slide response.</p>}<textarea value={jsonText} onChange={e=>setJsonText(e.target.value)} spellCheck={false}/>{jsonError&&<p className="jsonError">{jsonError}</p>}<footer><button onClick={()=>setJsonSlide(null)}>Cancel</button><button className="primary" onClick={applyJson}>Validate & apply slide</button></footer></section></div>}<header className="blueTop"><Logo/><span>Visual blueprint</span><div><button onClick={back}>← Revise prompt</button><button className="primary" onClick={next}>{aiLocked?"Approve AI show →":"Build presentation →"}</button></div></header><div className={`blue visualBlueprint ${aiLocked?"aiBlueprint":""}`}><aside><small>VALIDATED AI BLUEPRINT</small><h1>{slides[0]?.title||"Your presentation"}</h1><dl><dt>Slides</dt><dd>{slides.length}</dd><dt>Images added</dt><dd>{slides.filter((s:Slide)=>s.imageData).length} / {slides.length}</dd><dt>Motion plans</dt><dd>{slides.filter((s:Slide)=>s.motion).length} ready</dd></dl><h3>Image workflow</h3><ol className="imageSteps"><li>Copy the image direction</li><li>Generate it in your preferred AI image tool</li><li>Download and upload it to the matching slide</li></ol><button onClick={()=>setSlides((all:Slide[])=>professionalizeDeck(all))}>✦ Professionalize all slides</button></aside><section><Title over="PRESENTATION FLOW" title={`${slides.length} slides · visual and motion ready`}/>{slides.map((s:Slide,i:number)=><article className="blueprintRow" key={s.id}><div className="blueprintMain"><i>⠿</i><b>{String(i+1).padStart(2,"0")}</b><span><input value={s.title.replace("\n"," ")} onChange={e=>setSlides(slides.map((x:Slide,j:number)=>j===i?{...x,title:e.target.value}:x))}/><small>{s.tag}</small></span><em>{s.layout}</em><button onClick={()=>setSlides(slides.filter((_:Slide,j:number)=>j!==i))}>×</button></div><div className="slideRowActions"><button onClick={()=>setPreview(i)}>⛶ Fullscreen</button><button onClick={()=>openJson(i)}>⌘ JSON</button><button onClick={()=>professionalize(i)}>◇ Professionalize</button><button onClick={()=>regenerate(i)}>✦ Regenerate</button><button className="danger" onClick={()=>{if(confirm(`Remove slide ${i+1}?`))setSlides((all:Slide[])=>all.filter((_:Slide,index:number)=>index!==i))}}>× Remove</button></div>{aiLocked&&<div className="aiBlueprintPreview"><SlideView s={s}/></div>}<div className="visualBrief"><span><b>▧ Image direction</b><small>{s.imageDescription||"AI chose a text-led slide; no image is required."}</small>{s.imageDescription&&<div className="imagePromptActions"><button onClick={()=>navigator.clipboard?.writeText(s.imageDescription||"")}>⧉ Copy image prompt</button><label className={s.imageData?"imageUpload added":"imageUpload"}>{s.imageData?"✓ Replace uploaded image":"↑ Upload generated image"}<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>upload(i,e.target.files?.[0])}/></label></div>}</span><span><b>✦ Motion</b><small>{s.motion||"Subtle reveal"}</small>{s.imageData&&<img className="blueprintThumb" src={s.imageData} alt="Uploaded slide visual"/>}</span></div></article>)}<button className="add" onClick={()=>setSlides([...slides,{id:Date.now(),title:"New slide",tag:"NEW IDEA",body:"Add your key message",layout:"content",notes:"",imageDescription:"Describe the ideal supporting image",motion:"subtle reveal",shapes:[]}])}>＋ Add a slide</button></section></div></>}
-function Editor({aiLocked,title,slides,sel,setSel,cur,update,tab,setTab,blueprint,save,present,add,flash,undo,redo,canUndo,canRedo,syncState}:any){const upload=async(file?:File)=>{if(!file)return;try{flash("Compressing and uploading PNG…");const src=await uploadPng(file);update("images",[...(cur.images||[]),{id:Date.now(),src,x:70,y:50,w:34,h:52}]);flash("Image added and synced")}catch(error){flash(error instanceof Error?error.message:"Image upload failed")}},replaceImage=async(file?:File)=>{if(!file)return;try{flash("Compressing and uploading PNG…");const src=await uploadPng(file);if(cur.selectedImageId)update("images",(cur.images||[]).map((image:CanvasImage)=>image.id===cur.selectedImageId?{...image,src}:image));else update("imageData",src);flash("Image replaced and synced")}catch(error){flash(error instanceof Error?error.message:"Image upload failed")}};const shape=(type:Shape["type"])=>update("shapes",[...(cur.shapes||[]),{id:Date.now(),type,x:68,y:62,color:"#e85d3f"}]);const moveShape=(id:number,cx:number,cy:number)=>{const el=document.querySelector(".editor .slide")?.getBoundingClientRect();if(!el)return;update("shapes",(cur.shapes||[]).map((s:Shape)=>s.id===id?{...s,x:Math.max(4,Math.min(92,(cx-el.left)/el.width*100)),y:Math.max(5,Math.min(90,(cy-el.top)/el.height*100))}:s))};return <div className={`editor ${aiLocked?"aiLocked":""}`}><header><Logo/><div className="doc"><b>{title}</b><small className={`syncStatus ${syncState}`}>{syncState==="saving"?"● Saving changes…":syncState==="offline"?"● Offline · saved locally":"✓ Saved and synced"}</small></div><nav><button className="blueprintBack" onClick={blueprint}>← Blueprint</button><span className="historyControls"><button disabled={!canUndo} onClick={undo} title="Undo (⌘Z)">↶</button><button disabled={!canRedo} onClick={redo} title="Redo (⇧⌘Z)">↷</button></span></nav><div><button onClick={save}>Save</button><button onClick={()=>flash("Review score: 89 · Strong audience fit")}>Review</button><button onClick={present}>▷ Present</button><button>Share</button><button className="darkBtn" onClick={()=>flash("Export ready: PDF, PPTX or PNG")}>Export⌄</button></div></header><div className="workspace"><aside className="slides"><div><b>Slides</b><span>{slides.length}</span></div><section>{slides.map((s:Slide,i:number)=><button className={i===sel?"on":""} onClick={()=>setSel(i)} key={s.id}><b>{i+1}</b><div className={`mini ${s.layout} theme-${s.theme||"studio"}`}><small>{s.tag}</small><strong>{s.title.replace("\n"," ")}</strong></div></button>)}</section><button onClick={add}>＋ Add slide</button></aside><section className="stage"><div className="toolbar editorTools canvaTools"><div className="toolGroup"><select title="Font family" value={cur.fontFamily||"Georgia"} onChange={e=>update("fontFamily",e.target.value)}><option>Georgia</option><option>Arial</option><option>Helvetica</option><option>Courier New</option><option>Trebuchet MS</option></select><label>Title <input className="sizeInput" type="number" min="24" max="96" value={cur.titleSize||43} onChange={e=>update("titleSize",+e.target.value)}/></label><label>Body <input className="sizeInput" type="number" min="10" max="48" value={cur.bodySize||14} onChange={e=>update("bodySize",+e.target.value)}/></label><button title="Bold" onClick={()=>document.execCommand("bold")}><b>B</b></button><button title="Italic" onClick={()=>document.execCommand("italic")}><i>I</i></button><button onClick={()=>update("textAlign","left")}>≡</button><button onClick={()=>update("textAlign","center")}>≣</button><button onClick={()=>update("textAlign","right")}>≡</button><label title="Text colour"><input type="color" value={cur.textColor||"#17202c"} onChange={e=>update("textColor",e.target.value)}/></label></div><div className="toolGroup insertTools"><label title="Slide colour">Slide <input type="color" value={cur.background||"#f7f2e9"} onChange={e=>update("background",e.target.value)}/></label><button onClick={()=>shape("rectangle")}>□</button><button onClick={()=>shape("circle")}>○</button><button onClick={()=>shape("line")}>—</button><label className="toolbarUpload">▧ Image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>upload(e.target.files?.[0])}/></label></div><strong className="motionBadge"><i>✦</i> {cur.motion||`Smart motion · ${cur.layout}`}</strong></div><div className="canvas"><div><SlideView key={cur.id} s={cur} editable={!aiLocked} update={update} moveShape={moveShape}/></div></div><div className="notes"><header><b>Speaker notes</b><button onClick={()=>{update("notes",cur.notes||"Spend 3 minutes here. Explain with a familiar visual analogy, then ask learners to predict the next step.");flash("Speaker notes generated")}}>✦ Generate notes</button></header><textarea value={cur.notes} onChange={e=>update("notes",e.target.value)}/></div><footer><span>Slide {sel+1} of {slides.length}</span><span>Select text to apply bold or italic · drag shapes on canvas</span></footer></section><aside className="copilot">{aiLocked?<div className="aiDirector"><i>✦</i><small>AI AUTOPILOT</small><h2>The AI is running this show.</h2><p>Content, composition, colour, image placement and motion were validated from the AI JSON and are locked for faithful rendering.</p><dl><dt>Layout</dt><dd>{cur.layout}</dd><dt>Motion</dt><dd>{cur.motion||"none"}</dd><dt>Visual</dt><dd>{cur.imageData?"AI image URL":"Prompt-directed"}</dd></dl><button onClick={present}>▷ Present AI show</button><button onClick={blueprint}>Review blueprint</button></div>:<><header>{["Copilot","Teaching","Design"].map(x=><button className={tab===x?"on":""} onClick={()=>setTab(x)} key={x}>{x==="Copilot"?"✦ ":""}{x}</button>)}</header>{tab==="Copilot"?<AI cur={cur} update={update} flash={flash}/>:tab==="Teaching"?<Teach cur={cur} update={update} flash={flash}/>:<Design cur={cur} update={update} upload={upload} replaceImage={replaceImage} flash={flash}/>}</>}</aside></div></div>}
-function AIDirectionVisual({description}:{description:string}){const d=description.toLowerCase();if(d.includes("dom tree"))return <div className="smartVisual domVisual"><b>html</b><span>head</span><span>body</span><i>title</i><i>h1</i><i>p</i></div>;if(d.includes("anchor tag")||d.includes("opening tag"))return <div className="smartVisual anatomyVisual"><code>&lt;a <mark>href</mark>=<em>"/work"</em>&gt;</code><strong>Visit KMIT</strong><code>&lt;/a&gt;</code><span>attribute</span><span>content</span></div>;if(d.includes("wireframe")||d.includes("semantic"))return <div className="smartVisual semanticVisual"><b>HEADER</b><span>NAV</span><main>MAIN <i>ARTICLE</i></main><aside>ASIDE</aside><footer>FOOTER</footer></div>;return <div className="smartVisual tagVisual"><code>&lt;html&gt;</code><code>&nbsp;&nbsp;&lt;body&gt;</code><code>&nbsp;&nbsp;&nbsp;&nbsp;&lt;h1&gt;</code><code>&nbsp;&nbsp;&lt;/body&gt;</code><code>&lt;/html&gt;</code></div>}
-function splitCodeExample(source:string){const lines=source.split("\n"),example=lines.findIndex(line=>/^\s*Example:\s*$/i.test(line)),annotation=lines.findIndex(line=>/^\s*(?:•|Key attributes:)/i.test(line)),start=example>=0?example+1:0,end=annotation>=0?annotation:lines.length,code=lines.slice(start,end).join("\n").trim(),annotations=(annotation>=0?lines.slice(annotation):example>0?lines.slice(0,example):[]).map(line=>line.replace(/^\s*•\s*/,"").trim()).filter(Boolean).slice(0,4);return{code:code||source,annotations}}
-function annotationMatchesLine(line:string,items:string[]){const value=line.toLowerCase(),trim=value.trim();return items.some(item=>{const note=item.toLowerCase(),tags=[...note.matchAll(/<([a-z][\w-]*)/g)].map(match=>match[1]);if(note.includes("<h1>")&&note.includes("<h6>")&&/<h[1-6][\s>]/.test(value))return true;if(tags.some(tag=>value.includes(`<${tag}`)))return true;if(/tag name/.test(note)&&/^<\/?[a-z]/.test(trim))return true;if(/attributes?/.test(note)&&/\w+=/.test(value))return true;if(/content/.test(note)&&trim&&!trim.startsWith("<"))return true;if(/closing tag/.test(note)&&/^<\//.test(trim))return true;if(/key attributes/.test(note)&&/(type=|name=|required|minlength|pattern=|autocomplete=)/.test(value))return true;if(/void elements/.test(note)&&/<(?:img|br|input)[\s>]/.test(value))return true;return false})}
-function CodeAnnotations({items}:{items:string[];source:string;positions?:CalloutPosition[];editable?:boolean;selected?:number;onMove?:(index:number,x:number,y:number)=>void;onSelect?:(index:number)=>void;onArrow?:(index:number,arrow:CalloutPosition["arrow"])=>void}){if(!items.length)return null;return <div className="codeAnnotations anchoredAnnotations codeBulletList" aria-label="Code notes">{items.map((item,index)=><span key={index}><b>{item}</b></span>)}</div>}
-function runnableDocument(source:string){const clean=source.replace(/<script\b[\s\S]*?<\/script>/gi,"").replace(/\son\w+\s*=/gi," data-blocked-event=");const pick=(pattern:RegExp)=>clean.match(pattern)?.[0]||"";let markup=pick(/<!doctype[\s\S]*?<\/html>/i)||pick(/<form\b[\s\S]*?<\/form>/i)||pick(/<img\b[\s\S]*?>(?:\s*<video\b[\s\S]*?<\/video>)?/i)||pick(/<h2>Reading list<\/h2>[\s\S]*?<\/ol>/i)||pick(/<a\b[\s\S]*?<\/a>/i);if(!markup)markup=/<[a-z][\s\S]*>/i.test(clean)?clean:"<p>No renderable HTML was found.</p>";return /<!doctype|<html[\s>]/i.test(markup)?markup:`<!doctype html><html><head><meta charset="utf-8"></head><body>${markup}</body></html>`}
-function CodeOutput({source}:{source:string}){return <aside className="codeOutput"><header><i/><i/><i/><b>OUTPUT</b></header><iframe title="Live rendered HTML output" sandbox="" srcDoc={runnableDocument(source)}/></aside>}
-function SlideView({s,editable,calloutEditable,update,moveShape}:{s:Slide,editable?:boolean,calloutEditable?:boolean,update?:(f:keyof Slide,v:any)=>void,moveShape?:(id:number,x:number,y:number)=>void}){
- const ed=editable?{contentEditable:true,suppressContentEditableWarning:true}:{};
- const codeParts=s.layout==="code"?splitCodeExample(s.body):null,code=codeParts?.code.split("\n")||null;
- const snap=(value:number)=>Math.abs(value-50)<1.5?50:value;
- const moveBlock=(kind:"title"|"body"|"image",cx:number,cy:number)=>{const el=document.querySelector(".editor .slide")?.getBoundingClientRect();if(!el)return;update?.("__patch",{[`${kind}X`]:snap(Math.max(0,Math.min(95,(cx-el.left)/el.width*100))),[`${kind}Y`]:snap(Math.max(0,Math.min(95,(cy-el.top)/el.height*100)))})};
- const moveCanvasImage=(id:number,cx:number,cy:number)=>{const el=document.querySelector(".editor .slide")?.getBoundingClientRect();if(!el)return;update?.("images",(s.images||[]).map(x=>x.id===id?{...x,x:snap(Math.max(0,Math.min(100,(cx-el.left)/el.width*100))),y:snap(Math.max(0,Math.min(100,(cy-el.top)/el.height*100)))}:x))};
- const calloutDefaults=()=> (codeParts?.annotations||[]).map((item,index)=>{const line=Math.max(0,(codeParts?.code||"").split("\n").findIndex(value=>annotationMatchesLine(value,[item])));return s.codeCallouts?.[index]||{x:50.5,y:47+line*4.7+index*5.2,arrow:"left" as const}});
- const moveCallout=(index:number,cx:number,cy:number)=>{const el=document.querySelector(".editor .slide")?.getBoundingClientRect();if(!el)return;const next=calloutDefaults().map((item,i)=>i===index?{...item,x:snap(Math.max(8,Math.min(92,(cx-el.left)/el.width*100))),y:snap(Math.max(8,Math.min(92,(cy-el.top)/el.height*100)))}:item);update?.("__patch",{codeCallouts:next,selectedCallout:index})};
- const setCalloutArrow=(index:number,arrow:CalloutPosition["arrow"])=>update?.("__patch",{codeCallouts:calloutDefaults().map((item,i)=>i===index?{...item,arrow}:item),selectedCallout:index});
- const resizeImage=(id:number|undefined,cx:number,cy:number)=>{const el=document.querySelector(".editor .slide")?.getBoundingClientRect();if(!el)return;const x=(cx-el.left)/el.width*100,y=(cy-el.top)/el.height*100;if(id!==undefined){const image=(s.images||[]).find(item=>item.id===id);if(image)update?.("images",(s.images||[]).map(item=>item.id===id?{...item,w:Math.max(10,Math.min(100,Math.abs(x-image.x)*2)),h:Math.max(10,Math.min(100,Math.abs(y-image.y)*2))}:item))}else update?.("__patch",{imageW:Math.max(10,Math.min(100,Math.abs(x-(s.imageX??76))*2)),imageH:Math.max(10,Math.min(100,Math.abs(y-(s.imageY??50))*2))})};
- const codeHeight=code?Math.min(58,Math.max(38,22+code.length*3.2)):38;
- return <article className={`slide ${s.layout} motion-${(s.motion||s.layout).replaceAll(" ","-")} theme-${s.theme||"studio"}`} style={{...(s.background?{background:s.background}:{}),...(code?{"--code-height":`${codeHeight}%`,"--code-center":`${28+codeHeight/2}%`,"--notes-top":`${30+codeHeight}%`}:{})} as React.CSSProperties}>
-  <b className="brand">S2S<span>●</span></b><small>{s.tag}</small>
-  <h1 {...ed} className={`${s.selectedBlock==="title"?"selectedCanvasBlock":""} ai-${s.titleAnimation||"none"}`} onClick={()=>editable&&update?.("selectedBlock","title")} onDoubleClick={(e:any)=>e.currentTarget.focus()} onPointerDown={e=>editable&&e.currentTarget.setPointerCapture(e.pointerId)} onPointerMove={e=>editable&&e.buttons===1&&e.currentTarget.hasPointerCapture(e.pointerId)&&moveBlock("title",e.clientX,e.clientY)} style={{fontFamily:s.fontFamily,fontSize:s.titleSize,color:s.textColor,textAlign:s.textAlign,...(s.titleX!==undefined?{position:"absolute",left:`${s.titleX}%`,top:`${s.titleY??28}%`,width:`${s.titleW??55}%`,margin:0}: {})}} onBlur={(e:any)=>update?.("title",e.currentTarget.innerText)}>{s.title}</h1>
-  {code?<pre className={`animatedCode ${s.selectedBlock==="body"?"selectedCanvasBlock":""} ai-${s.bodyAnimation||"none"}`} {...ed} onClick={()=>editable&&update?.("selectedBlock","body")} onPointerDown={e=>editable&&e.currentTarget.setPointerCapture(e.pointerId)} onPointerMove={e=>editable&&e.buttons===1&&e.currentTarget.hasPointerCapture(e.pointerId)&&moveBlock("body",e.clientX,e.clientY)} style={{fontFamily:s.fontFamily,fontSize:s.bodySize,color:s.textColor,textAlign:s.bodyAlign||s.textAlign,...(s.bodyX!==undefined?{position:"absolute",left:`${s.bodyX}%`,top:`${s.bodyY??55}%`,width:`${s.bodyW??48}%`,margin:0}: {})}} onBlur={(e:any)=>update?.("body",e.currentTarget.innerText)}>{code.map((line,i)=><span key={i} className={annotationMatchesLine(line,codeParts?.annotations||[])?"annotatedCodeLine":""} style={{"--line":i} as React.CSSProperties}><i className="lineNumber" aria-hidden="true">{i+1}</i>{line||" "}</span>)}</pre>:<p {...ed} className={`${s.selectedBlock==="body"?"selectedCanvasBlock":""} ai-${s.bodyAnimation||"none"}`} onClick={()=>editable&&update?.("selectedBlock","body")} onDoubleClick={(e:any)=>e.currentTarget.focus()} onPointerDown={e=>editable&&e.currentTarget.setPointerCapture(e.pointerId)} onPointerMove={e=>editable&&e.buttons===1&&e.currentTarget.hasPointerCapture(e.pointerId)&&moveBlock("body",e.clientX,e.clientY)} style={{fontFamily:s.fontFamily,fontSize:s.bodySize,color:s.textColor,textAlign:s.bodyAlign||s.textAlign,...(s.bodyX!==undefined?{position:"absolute",left:`${s.bodyX}%`,top:`${s.bodyY??55}%`,width:`${s.bodyW??48}%`,margin:0}: {})}} onBlur={(e:any)=>update?.("body",e.currentTarget.innerText)}>{s.body}</p>}
-  {code&&<CodeOutput source={codeParts?.code||s.body}/>} {codeParts&&<CodeAnnotations items={codeParts.annotations} source={codeParts.code} positions={s.codeCallouts} editable={editable||calloutEditable||!!update} selected={s.selectedCallout} onSelect={index=>update?.("selectedCallout",index)} onMove={moveCallout} onArrow={setCalloutArrow}/>}
-  {s.imageData&&<img onClick={()=>editable&&update?.("__patch",{selectedBlock:"image",selectedImageId:undefined})} onPointerDown={e=>editable&&e.currentTarget.setPointerCapture(e.pointerId)} onPointerMove={e=>editable&&e.buttons===1&&e.currentTarget.hasPointerCapture(e.pointerId)&&moveBlock("image",e.clientX,e.clientY)} className={`slideAsset ai-${(s.motion||"reveal").replaceAll(" ","-")} ${s.selectedBlock==="image"&&s.selectedImageId===undefined?"selectedCanvasBlock":""}`} src={s.imageData} alt={s.imageDescription||"Slide visual"} style={{filter:`brightness(${s.imageBrightness||100}%) contrast(${s.imageContrast||100}%) saturate(${s.imageSaturation||100}%)`,opacity:(s.imageOpacity??100)/100,objectFit:s.imageFit||"cover",...(s.imageX!==undefined?{left:`${s.imageX}%`,top:`${s.imageY??22}%`,width:`${s.imageW??36}%`,height:`${s.imageH??53}%`,right:"auto"}: {})}}/>}
-  {!s.imageData&&s.aiGenerated&&s.imageDescription&&<div className={`aiVisualPlaceholder ai-${(s.motion||"reveal").replaceAll(" ","-")}`} style={{left:`${s.imageX??76}%`,top:`${s.imageY??50}%`,width:`${s.imageW??38}%`,height:`${s.imageH??62}%`,opacity:(s.imageOpacity??100)/100}}><AIDirectionVisual description={s.imageDescription}/><b>STRUCTURAL FIGURE</b><span>{s.imageDescription}</span></div>}
-  {(s.images||[]).map(image=><img key={image.id} onClick={()=>editable&&update?.("__patch",{selectedBlock:"image",selectedImageId:image.id})} className={`slideAsset extraSlideImage ${s.selectedImageId===image.id?"selectedCanvasBlock":""}`} src={image.src} alt="Added slide visual" onPointerDown={e=>editable&&e.currentTarget.setPointerCapture(e.pointerId)} onPointerMove={e=>editable&&e.buttons===1&&e.currentTarget.hasPointerCapture(e.pointerId)&&moveCanvasImage(image.id,e.clientX,e.clientY)} style={{left:`${image.x}%`,top:`${image.y}%`,width:`${image.w}%`,height:`${image.h}%`,right:"auto",opacity:(image.opacity??100)/100,objectFit:image.fit||"cover",borderRadius:image.radius??8}}/>)}
-  {editable&&s.selectedBlock==="image"&&(()=>{const image=(s.images||[]).find(item=>item.id===s.selectedImageId),x=image?.x??s.imageX??76,y=image?.y??s.imageY??50,w=image?.w??s.imageW??36,h=image?.h??s.imageH??53,handles=["nw","ne","sw","se"];return <span className="canvasSelection" style={{left:`${x}%`,top:`${y}%`,width:`${w}%`,height:`${h}%`}}>{handles.map(handle=><i key={handle} className={`resizeHandle ${handle}`} onPointerDown={e=>e.currentTarget.setPointerCapture(e.pointerId)} onPointerMove={e=>e.buttons===1&&e.currentTarget.hasPointerCapture(e.pointerId)&&resizeImage(image?.id,e.clientX,e.clientY)}/>) }<b className="selectionLabel">Image · {Math.round(w)} × {Math.round(h)}</b></span>})()}
-  {(s.shapes||[]).map(shape=><i key={shape.id} onPointerDown={e=>editable&&e.currentTarget.setPointerCapture(e.pointerId)} onPointerMove={e=>editable&&e.buttons===1&&e.currentTarget.hasPointerCapture(e.pointerId)&&moveShape?.(shape.id,e.clientX,e.clientY)} className={`userShape ${shape.type}`} style={{left:`${shape.x}%`,top:`${shape.y}%`,"--shape-color":shape.color} as React.CSSProperties}>{shape.glyph}</i>) }
-  {s.layout==="number"&&<strong className="stat"><i>150</i><span>K</span><small>input values</small></strong>}
-  {s.layout==="matrix"&&<div className="matrix">{[3,18,52,81,94,70,21,8,9,44,91,99,77,32,12,4].map((n,i)=><i key={i} style={{"--cell":i,"--strength":.2+n/125} as React.CSSProperties}>{n}</i>)}<b className="scanWindow">3×3 filter</b></div>}
-  {s.layout==="process"&&<div className="kernel"><div className="imageGrid">{Array.from({length:16},(_,i)=><i key={i}/>) }<b className="movingWindow"/></div><span>→</span><b className="featureResult">FEATURE<small>edge found</small></b></div>}
-  {s.layout==="architecture"&&<div className="arch">{["IMAGE","CONV","RELU","POOL","CLASS"].map((x,i)=><span key={x} style={{"--step":i} as React.CSSProperties}>{x}{i<4&&<b>→</b>}</span>)}</div>}
-  {s.layout==="cycle"&&<div className="learningCycle">{["Predict","Measure","Correct","Repeat"].map((x,i)=><span key={x} style={{"--step":i} as React.CSSProperties}>{x}</span>)}<i>↻</i></div>}
-  {s.layout==="summary"&&<div className="summaryWords"><span>LOCAL</span><span>HIERARCHICAL</span><span>LEARNED</span></div>}
-  <em>{String(s.id).padStart(2,"0")}</em>
- </article>
+function slidesForTemplate(name: string): Slide[] {
+  if (name === "KMTI Parents Presentation") return slidesForKmtiReference();
+  const system = templateSystems[name] || templateSystems["Visual Classroom"],
+    institutionalImages = [
+      "Wide aerial photograph of a modern university campus in its surrounding city, clear daylight, credible institutional photography",
+      "Professional environmental portrait of an academic leader in a bright campus interior, natural expression, editorial composition",
+      "Panoramic campus buildings with a restrained milestone timeline across the lower edge",
+      "Authentic collage of classrooms, laboratories, library and collaborative learning spaces, consistent natural lighting",
+      "Students working with faculty in a modern classroom, candid documentary photography",
+      "Student clubs, sports, cultural activities and collaborative project work arranged as an energetic editorial photo mosaic",
+      "Clean evidence-led placement and outcomes visual with employer ecosystem context, corporate blue and white",
+      "Prospective students and families walking through a welcoming green campus, optimistic natural light",
+    ];
+  return system.story.map((x, i) => ({
+    id: i + 1,
+    title: x[0],
+    tag: x[1],
+    body: x[2],
+    layout: x[3],
+    notes: `${i === 0 ? "Open with a confident framing question." : "Pause for the audience to process the key idea."} Adapt this ${name} slide to your subject and audience.`,
+    theme: system.theme,
+    ...(name === "Institutional Showcase"
+      ? {
+          imageDescription: institutionalImages[i],
+          imageX: 76,
+          imageY: 52,
+          imageW: 38,
+          imageH: 64,
+          imageFit: "cover" as const,
+          imageOpacity: 100,
+          aiGenerated: true,
+        }
+      : {}),
+  }));
 }
-function AI({cur,update,flash}:any){const[question,setQuestion]=useState("");const simple=()=>{update("body",cur.body.split(/[.—]/)[0]+".");flash("Slide simplified")},technical=()=>{update("body",cur.body+" This mechanism should be evaluated through its inputs, transformation steps, constraints and measurable output.");flash("Technical depth added")},example=()=>{update("body",cur.body+" For example, connect this idea to a concrete scenario the audience already understands.");flash("Example added")},quiz=()=>{update("notes",cur.notes+"\n\nAudience check: Explain the core idea in one sentence, then identify one practical use case.");flash("Quiz added to speaker notes")};return <div className="ai"><div className="context"><i>✦</i><span><b>Working on slide {cur.id}</b><small>{cur.title.replace("\n"," ")}</small></span></div><label>QUICK ACTIONS</label><div className="quick"><button onClick={simple}>Aa Simplify</button><button onClick={technical}>⌘ More technical</button><button onClick={example}>＋ Add example</button><button onClick={()=>{update("layout","architecture");update("motion","diagram sequence");flash("Diagram layout applied")}}>◇ Add diagram</button><button onClick={simple}>≡ Reduce text</button><button onClick={quiz}>? Create quiz</button></div><div className="suggest"><small>✦ LIVE SUGGESTION</small><b>{cur.body.length>150?"Reduce cognitive load":"Strengthen the visual explanation"}</b><p>{cur.body.length>150?"Split or simplify the message so the audience can absorb it quickly.":"Use a progressive diagram to reveal relationships in sequence."}</p><button onClick={cur.body.length>150?simple:()=>{update("layout","process");update("motion","progressive build");flash("Suggestion applied")}}>Apply</button></div><div className="ask"><input value={question} onChange={e=>setQuestion(e.target.value)} placeholder="Ask about this slide…"/><button onClick={()=>{if(!question)return;update("notes",cur.notes+`\n\nCopilot response to “${question}”: Lead with a familiar analogy, then reveal the technical language.`);setQuestion("");flash("Copilot answer added to notes")}}>↑</button></div></div>}
-function Teach({cur,update,flash}:any){return <div className="teach"><label>TEACHING LENS</label><h3>Learning objective</h3><textarea value={`By the end, learners can explain: ${cur.title.replace("\n"," ")}`} onChange={e=>update("notes",`Learning objective: ${e.target.value}\n${cur.notes}`)}/><div><button onClick={()=>{update("body",`In simple terms: ${cur.body.split(/[.—]/)[0]}.`);flash("Beginner level applied")}}><small>Difficulty</small><b>Beginner</b></button><button onClick={()=>{update("body",cur.body+" Consider the underlying assumptions, trade-offs and boundary conditions.");flash("Advanced depth applied")}}><small>Difficulty</small><b>Advanced</b></button></div><h3>Teacher notes</h3><textarea value={cur.notes} onChange={e=>update("notes",e.target.value)}/><h3>Teaching actions</h3><div className="teachingActions"><button onClick={()=>{update("notes",cur.notes+"\n\nDiscussion: What would change if the main assumption were removed?");flash("Discussion question added")}}>＋ Discussion</button><button onClick={()=>{update("notes",cur.notes+"\n\nActivity: In pairs, create one example and one counterexample in three minutes.");flash("Mini activity added")}}>＋ Activity</button><button onClick={()=>{update("notes",cur.notes+"\n\nCheck: Ask one learner to explain the idea without using the slide's terminology.");flash("Understanding check added")}}>＋ Check</button></div></div>}
-function Design({cur,update,upload,replaceImage,flash}:any){const themes=[["Modern","classroom","#fff8ef","#20242b"],["Technical","developer","#182132","#f4f7fb"],["Academic","research","#f3eee4","#2a2f36"],["Executive","executive","#f7f5fb","#272034"],["Editorial","editorial","#ead0ad","#2a211b"],["Minimal","studio","#ffffff","#17202c"]],selectedImage=(cur.images||[]).find((image:CanvasImage)=>image.id===cur.selectedImageId),imageUpdate=(key:keyof CanvasImage,value:number|string)=>selectedImage&&update("images",(cur.images||[]).map((image:CanvasImage)=>image.id===selectedImage.id?{...image,[key]:value}:image)),removeImage=()=>selectedImage?update("__patch",{images:(cur.images||[]).filter((image:CanvasImage)=>image.id!==selectedImage.id),selectedImageId:undefined}):update("imageData",undefined),imageLayout=(x:number,y:number,w:number,h:number)=>selectedImage?update("images",(cur.images||[]).map((image:CanvasImage)=>image.id===selectedImage.id?{...image,x,y,w,h}:image)):update("__patch",{imageX:x,imageY:y,imageW:w,imageH:h,imageOpacity:100}),duplicateImage=()=>selectedImage&&update("__patch",{images:[...(cur.images||[]),{...selectedImage,id:Date.now(),x:Math.min(94,selectedImage.x+4),y:Math.min(94,selectedImage.y+4)}],selectedImageId:undefined}),moveLayer=(direction:number)=>{if(!selectedImage)return;const images=[...(cur.images||[])],index=images.findIndex((image:CanvasImage)=>image.id===selectedImage.id),next=Math.max(0,Math.min(images.length-1,index+direction));images.splice(index,1);images.splice(next,0,selectedImage);update("images",images)},target=cur.selectedBlock==="body"?"body":"title",coord=(label:string,key:string,value:number,min=0,max=100)=><label className="coordField"><span>{label}</span><input type="range" min={min} max={max} value={value} onChange={e=>update(key,+e.target.value)}/><input type="number" min={min} max={max} value={Math.round(value)} onChange={e=>update(key,+e.target.value)}/></label>,addShape=(type:Shape["type"],glyph?:string)=>update("shapes",[...(cur.shapes||[]),{id:Date.now(),type,x:68,y:62,color:"#e85d3f",glyph}]),autoArrange=()=>{const images=(cur.images||[]).map((image:CanvasImage,index:number)=>({...image,x:index?72:76,y:index?76:50,w:index?22:38,h:index?26:62}));update("__patch",{titleX:30,titleY:35,titleW:cur.imageData||images.length?48:70,bodyX:29,bodyY:62,bodyW:cur.imageData||images.length?44:64,textAlign:"left",images,...(cur.imageData?{imageX:76,imageY:50,imageW:38,imageH:62,imageOpacity:100}:{})});flash("Content-aware layout applied")};return <div className="design inspectorPanel"><p className="inspectorHint">Select an element on the canvas, then use these precise controls. Double-click text to edit it.</p><details open><summary><span><i>◇</i><b>Slide design</b></span><em>Theme, canvas & elements</em></summary><section><div className="themeGrid">{themes.map(x=><button className={cur.theme===x[1]?"on":""} key={x[0]} onClick={()=>{update("__patch",{theme:x[1],background:x[2],textColor:x[3]});flash(x[0]+" theme applied")}}><i style={{background:x[2],borderColor:x[3]}}/><b>{x[0]}</b></button>)}</div><div className="designControls"><label>Background<input type="color" value={cur.background||"#f7f2e9"} onChange={e=>update("background",e.target.value)}/></label><label>Text<input type="color" value={cur.textColor||"#17202c"} onChange={e=>update("textColor",e.target.value)}/></label></div><div className="professionalActions"><button onClick={autoArrange}>✦ Auto arrange</button><select value={cur.motion||"subtle reveal"} onChange={e=>update("motion",e.target.value)}><option>subtle reveal</option><option>progressive build</option><option>emphasis</option><option>diagram sequence</option><option>none</option></select></div><div className="insertElementGrid"><button onClick={()=>addShape("rectangle")}>□ Rectangle</button><button onClick={()=>addShape("circle")}>○ Circle</button><button onClick={()=>addShape("line")}>— Line</button><label>▧ Image<input type="file" accept="image/*" onChange={e=>upload(e.target.files?.[0])}/></label><button onClick={()=>addShape("symbol","★")}>★ Star</button><button onClick={()=>addShape("symbol","→")}>→ Arrow</button><button onClick={()=>addShape("symbol","✓")}>✓ Check</button><button onClick={()=>addShape("symbol","✦")}>✦ Spark</button></div></section></details><details open={cur.selectedBlock==="title"||cur.selectedBlock==="body"}><summary><span><i>Aa</i><b>Content editor</b></span><em>Font, size & position</em></summary><section><div className="blockSelector"><button className={target==="title"?"on":""} onClick={()=>update("selectedBlock","title")}>Title</button><button className={target==="body"?"on":""} onClick={()=>update("selectedBlock","body")}>Body</button></div><label className="inspectorSelect">Font<select value={cur.fontFamily||"Georgia"} onChange={e=>update("fontFamily",e.target.value)}><option>Georgia</option><option>Arial</option><option>Helvetica</option><option>Trebuchet MS</option><option>Courier New</option></select></label><div className="fontRow"><label>Size<input type="number" min="10" max="120" value={target==="title"?(cur.titleSize||43):(cur.bodySize||14)} onChange={e=>update(target==="title"?"titleSize":"bodySize",+e.target.value)}/></label><button onClick={()=>document.execCommand("bold")}><b>B</b></button><button onClick={()=>document.execCommand("italic")}><i>I</i></button><input title="Text colour" type="color" value={cur.textColor||"#17202c"} onChange={e=>update("textColor",e.target.value)}/></div><div className="alignRow"><button className={cur.textAlign==="left"?"on":""} onClick={()=>update("textAlign","left")}>Left</button><button className={cur.textAlign==="center"?"on":""} onClick={()=>update("textAlign","center")}>Centre</button><button className={cur.textAlign==="right"?"on":""} onClick={()=>update("textAlign","right")}>Right</button></div><h4>Position & size (%)</h4>{coord("X",target==="title"?"titleX":"bodyX",target==="title"?(cur.titleX??30):(cur.bodyX??29))}{coord("Y",target==="title"?"titleY":"bodyY",target==="title"?(cur.titleY??35):(cur.bodyY??62))}{coord("Width",target==="title"?"titleW":"bodyW",target==="title"?(cur.titleW??48):(cur.bodyW??44),15,90)}</section></details><details open={cur.selectedBlock==="image"}><summary><span><i>▧</i><b>Image editor</b></span><em>Crop, effects & position</em></summary><section>{(cur.imageData||selectedImage)?<div className="imageEditor"><img src={selectedImage?.src||cur.imageData} alt="Selected slide visual"/><label>Brightness <input type="range" min="20" max="180" value={cur.imageBrightness||100} onChange={e=>update("imageBrightness",+e.target.value)}/><b>{cur.imageBrightness||100}%</b></label><label>Contrast <input type="range" min="20" max="180" value={cur.imageContrast||100} onChange={e=>update("imageContrast",+e.target.value)}/><b>{cur.imageContrast||100}%</b></label><label>Saturation <input type="range" min="0" max="200" value={cur.imageSaturation||100} onChange={e=>update("imageSaturation",+e.target.value)}/><b>{cur.imageSaturation||100}%</b></label><label>Opacity <input type="range" min="10" max="100" value={selectedImage?.opacity??cur.imageOpacity??100} onChange={e=>selectedImage?imageUpdate("opacity",+e.target.value):update("imageOpacity",+e.target.value)}/><b>{selectedImage?.opacity??cur.imageOpacity??100}%</b></label>{selectedImage&&<label>Corner radius <input type="range" min="0" max="48" value={selectedImage.radius??8} onChange={e=>imageUpdate("radius",+e.target.value)}/><b>{selectedImage.radius??8}px</b></label>}<h4>Position & size (%)</h4><div className="imageLayouts"><button onClick={()=>imageLayout(76,50,38,62)}>Right</button><button onClick={()=>imageLayout(24,50,38,62)}>Left</button><button onClick={()=>imageLayout(50,50,100,100)}>Background</button></div>{selectedImage?<><label className="coordField"><span>X</span><input type="range" min="0" max="100" value={selectedImage.x} onChange={e=>imageUpdate("x",+e.target.value)}/><input type="number" value={Math.round(selectedImage.x)} onChange={e=>imageUpdate("x",+e.target.value)}/></label><label className="coordField"><span>Y</span><input type="range" min="0" max="100" value={selectedImage.y} onChange={e=>imageUpdate("y",+e.target.value)}/><input type="number" value={Math.round(selectedImage.y)} onChange={e=>imageUpdate("y",+e.target.value)}/></label><label className="coordField"><span>Width</span><input type="range" min="10" max="100" value={selectedImage.w} onChange={e=>imageUpdate("w",+e.target.value)}/><input type="number" value={Math.round(selectedImage.w)} onChange={e=>imageUpdate("w",+e.target.value)}/></label><label className="coordField"><span>Height</span><input type="range" min="10" max="100" value={selectedImage.h} onChange={e=>imageUpdate("h",+e.target.value)}/><input type="number" value={Math.round(selectedImage.h)} onChange={e=>imageUpdate("h",+e.target.value)}/></label></> :<>{coord("X","imageX",cur.imageX??76)}{coord("Y","imageY",cur.imageY??50)}{coord("Width","imageW",cur.imageW??38,10,100)}{coord("Height","imageH",cur.imageH??62,10,100)}</>}<div><button onClick={()=>selectedImage?imageUpdate("fit",selectedImage.fit==="contain"?"cover":"contain"):update("imageFit",cur.imageFit==="contain"?"cover":"contain")}>{(selectedImage?.fit||cur.imageFit)==="contain"?"Fill frame":"Fit image"}</button><label className="replaceImage">Replace<input type="file" accept="image/*" onChange={e=>replaceImage(e.target.files?.[0])}/></label><button className="removeImage" onClick={removeImage}>Remove</button></div>{selectedImage&&<div className="objectActions"><button onClick={duplicateImage}>Duplicate</button><button onClick={()=>moveLayer(-1)}>Send backward</button><button onClick={()=>moveLayer(1)}>Bring forward</button></div>}</div>:<label className="emptyImageEditor">▧<b>Add an image to this slide</b><small>Upload PNG, JPEG or WebP</small><input type="file" accept="image/*" onChange={e=>upload(e.target.files?.[0])}/></label>}</section></details></div>}
+function professionalizeSlide(slide: Slide): Slide[] {
+  const words = slide.body.trim().split(/\s+/).length,
+    cleanTitle = slide.title.replace(/^\s*\d+[.)]?\s*/, "").trim();
+  const base: Slide = {
+    ...slide,
+    title: cleanTitle || slide.title,
+    selectedBlock: undefined,
+    selectedImageId: undefined,
+    shapes: [],
+    titleAnimation: "fade-up",
+    bodyAnimation: "fade-up",
+    textAlign: "left",
+    bodyAlign: "left",
+  };
+  const codeLine = slide.body
+    .split("\n")
+    .findIndex((line) => /^\s*(?:<!doctype|<\/?[a-z][^>]*>)/i.test(line));
+  if (slide.layout === "code" && codeLine >= 0) {
+    const lines = slide.body.split("\n"),
+      prose = lines.slice(0, codeLine).join("\n").trim(),
+      code = lines.slice(codeLine).join("\n").trim();
+    const lead = (
+      prose.split(/\n\n+/)[0] ||
+      `A focused example of ${cleanTitle.toLowerCase()}.`
+    )
+      .replace(/^Definition\.\s*/i, "")
+      .slice(0, 280);
+    return [
+      {
+        ...base,
+        body: lead,
+        layout: "content",
+        titleX: 31,
+        titleY: 34,
+        titleW: 48,
+        titleSize: 46,
+        bodyX: 31,
+        bodyY: 62,
+        bodyW: 46,
+        bodySize: 19,
+        imageX: 77,
+        imageY: 51,
+        imageW: 36,
+        imageH: 64,
+        imageFit: "contain",
+        motion: "subtle-reveal",
+      },
+      {
+        ...base,
+        id: slide.id + 0.1,
+        title: `${cleanTitle} · example`,
+        tag: "REFERENCE · CODE + OUTPUT",
+        body: code,
+        layout: "code",
+        titleX: 50,
+        titleY: 17,
+        titleW: 84,
+        titleSize: 34,
+        bodyX: 34,
+        bodyY: 58,
+        bodyW: 48,
+        bodySize: 13,
+        imageData: undefined,
+        imageDescription: "",
+        shapes: [],
+        motion: "progressive-build",
+      },
+    ];
+  }
+  if (words > 105) {
+    const paragraphs = slide.body.split(/\n\n+/).filter(Boolean),
+      chunks: string[] = [];
+    let chunk = "";
+    for (const paragraph of paragraphs) {
+      if ((chunk + " " + paragraph).trim().split(/\s+/).length > 65 && chunk) {
+        chunks.push(chunk);
+        chunk = paragraph;
+      } else chunk += (chunk ? "\n\n" : "") + paragraph;
+    }
+    if (chunk) chunks.push(chunk);
+    return chunks.map((body, index) => ({
+      ...base,
+      id: slide.id + index / 10,
+      title: index ? `${cleanTitle} · continued` : cleanTitle,
+      body,
+      layout: index ? "content" : slide.layout,
+      titleX: slide.imageDescription && !index ? 31 : 50,
+      titleY: 30,
+      titleW: slide.imageDescription && !index ? 48 : 82,
+      titleSize: 40,
+      bodyX: slide.imageDescription && !index ? 31 : 50,
+      bodyY: 60,
+      bodyW: slide.imageDescription && !index ? 46 : 76,
+      bodySize: 17,
+      textAlign: slide.imageDescription && !index ? "left" : "center",
+      bodyAlign: slide.imageDescription && !index ? "left" : "center",
+      imageData: index ? undefined : slide.imageData,
+      imageDescription: index ? "" : slide.imageDescription,
+      imageX: 77,
+      imageY: 51,
+      imageW: 36,
+      imageH: 64,
+      shapes: [],
+      motion: "subtle-reveal",
+    }));
+  }
+  if (slide.layout === "cover")
+    return [
+      {
+        ...base,
+        titleX: 31,
+        titleY: 43,
+        titleW: 48,
+        titleSize: 54,
+        bodyX: 31,
+        bodyY: 67,
+        bodyW: 45,
+        bodySize: 17,
+        imageX: 78,
+        imageY: 51,
+        imageW: 34,
+        imageH: 72,
+        shapes: [],
+      },
+    ];
+  const hasVisual = Boolean(slide.imageData || slide.imageDescription);
+  return [
+    {
+      ...base,
+      titleX: hasVisual ? 31 : 50,
+      titleY: 28,
+      titleW: hasVisual ? 48 : 82,
+      titleSize: Math.min(slide.titleSize || 42, 44),
+      bodyX: hasVisual ? 31 : 50,
+      bodyY: 58,
+      bodyW: hasVisual ? 46 : 74,
+      bodySize: Math.min(slide.bodySize || 18, 18),
+      imageX: 77,
+      imageY: 54,
+      imageW: 36,
+      imageH: 62,
+    },
+  ];
+}
+function professionalizeDeck(slides: Slide[]) {
+  return slides
+    .flatMap(professionalizeSlide)
+    .map((slide, index) => ({ ...slide, id: index + 1 }));
+}
+function Logo() {
+  return (
+    <a
+      className="logo"
+      href="/"
+      aria-label="Back to dashboard"
+      onClick={(e) => {
+        e.preventDefault();
+        window.dispatchEvent(new Event("s2s-dashboard"));
+      }}
+    >
+      <b>S2S</b>
+      <span>
+        Studio<small>Something to show</small>
+      </span>
+    </a>
+  );
+}
+async function logout() {
+  await fetch("/api/auth/logout", { method: "POST" });
+  location.assign("/");
+}
+function toggleAppearance() {
+  const dark = document.documentElement.classList.toggle("studioDark");
+  localStorage.setItem("s2s-appearance", dark ? "dark" : "light");
+}
+export default function Studio() {
+  const [view, setView] = useState<View>("home"),
+    [brief, setBrief] = useState(
+      "Teach convolutional neural networks with practical Python examples",
+    ),
+    [mode, setMode] = useState<string[]>(["Teaching", "Coding"]),
+    [theme, setTheme] = useState("Technical Blue"),
+    [audience, setAudience] = useState("Engineering students"),
+    [slides, setSlides] = useState(starter),
+    [sel, setSel] = useState(0),
+    [paste, setPaste] = useState(""),
+    [error, setError] = useState(""),
+    [tab, setTab] = useState("Copilot"),
+    [toast, setToast] = useState(""),
+    [deckTitle, setDeckTitle] = useState("Convolutional Neural Networks"),
+    [deckId, setDeckId] = useState(""),
+    [savedDecks, setSavedDecks] = useState<SavedDeck[]>([]),
+    [history, setHistory] = useState<Slide[][]>([]),
+    [future, setFuture] = useState<Slide[][]>([]),
+    [syncState, setSyncState] = useState<"saved" | "saving" | "offline">(
+      "saved",
+    ),
+    [aiLocked, setAiLocked] = useState(false);
+  const cur = slides[sel];
+  const prompt = useMemo(
+    () =>
+      JSON.stringify(
+        {
+          role: "You are the autonomous creative director, presentation architect, visual designer and motion director for S2S Studio.",
+          task: "Design the complete presentation. Make every content, layout, position, colour, image and animation decision. Return ONLY valid JSON matching response_schema. The user will not manually edit the result.",
+          input: {
+            topic: brief,
+            presentation_types: mode,
+            audience,
+            duration_minutes: 60,
+            preferred_theme: theme,
+          },
+          coordinate_system:
+            "All x, y, width and height values are percentages from 0 to 100. x/y specify the element centre. Keep every element within safe margins.",
+          rules: [
+            "Create 8–12 coherent slides with one dominant idea per slide",
+            "Use concise presentation copy, not document paragraphs",
+            "Never exceed 50 prose words on one slide",
+            "Never combine a full explanation, bullet list and complete code sample on one slide",
+            "Automatically split content when more than two conceptual layers appear",
+            "A code slide contains code plus at most three short annotations",
+            "Keep titles to two lines and section labels below eight words",
+            "Use one focal element and one supporting element per slide",
+            "Every image must explain the message rather than decorate it",
+            "Title, body, code and image bounding boxes must never overlap",
+            "Prefer three focused slides over one overloaded slide",
+            "Choose accessible colours with strong contrast",
+            "Create deliberate visual hierarchy and non-overlapping geometry",
+            "Use image_url only when you can provide a direct HTTPS image URL; otherwise use an empty string and provide a production-ready image_prompt",
+            "Animations must reinforce content importance and remain restrained",
+            "Use only the enumerated layout and animation values",
+            "Return no markdown fences, explanations or comments",
+          ],
+          response_schema: {
+            schema_version: "s2s-autopilot-1",
+            title: "string",
+            audience: "string",
+            design_system: {
+              theme:
+                "studio | classroom | developer | product | executive | research | founder | editorial | lab",
+              background: "#RRGGBB",
+              text_color: "#RRGGBB",
+              accent_color: "#RRGGBB",
+              font_family:
+                "Georgia | Arial | Helvetica | Trebuchet MS | Courier New",
+            },
+            slides: [
+              {
+                title: {
+                  text: "string",
+                  x: 30,
+                  y: 32,
+                  width: 48,
+                  font_size: 52,
+                  align: "left | center | right",
+                  animation: "fade-up | slide-left | zoom | type-in | none",
+                },
+                body: {
+                  text: "string",
+                  x: 30,
+                  y: 62,
+                  width: 44,
+                  font_size: 18,
+                  align: "left | center | right",
+                  animation: "fade-up | slide-left | zoom | type-in | none",
+                },
+                purpose: "string",
+                layout:
+                  "cover | content | number | matrix | process | cards | comparison | architecture | code | cycle | summary",
+                background: "#RRGGBB",
+                visual: {
+                  image_url: "direct HTTPS URL or empty string",
+                  image_prompt: "detailed image generation prompt",
+                  x: 76,
+                  y: 50,
+                  width: 38,
+                  height: 62,
+                  fit: "cover | contain",
+                  opacity: 100,
+                  animation: "fade-up | slide-left | zoom | reveal | none",
+                },
+                decorations: [
+                  {
+                    type: "circle | rectangle | line | symbol",
+                    symbol: "★ or empty",
+                    x: 80,
+                    y: 80,
+                    color: "#RRGGBB",
+                  },
+                ],
+                slide_transition:
+                  "subtle-reveal | progressive-build | emphasis | diagram-sequence | none",
+                speaker_notes: "string",
+              },
+            ],
+          },
+        },
+        null,
+        2,
+      ),
+    [brief, mode, theme, audience],
+  );
+  useEffect(() => {
+    document.documentElement.classList.toggle(
+      "studioDark",
+      localStorage.getItem("s2s-appearance") === "dark",
+    );
+  }, []);
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      const indexed = await loadDeckAssets();
+      let local = indexed;
+      try {
+        if (!local.length)
+          local = JSON.parse(localStorage.getItem("s2s-decks") || "[]");
+      } catch {
+        localStorage.removeItem("s2s-decks");
+      }
+      try {
+        const response = await fetch("/api/presentations");
+        if (response.ok) {
+          const data = await response.json(),
+            remote: SavedDeck[] = data.decks || [],
+            byId = new Map<string, SavedDeck>();
+          [...remote, ...local].forEach((deck) => {
+            const current = byId.get(deck.id);
+            if (!current || deck.updatedAt > current.updatedAt)
+              byId.set(deck.id, deck);
+          });
+          const merged = [...byId.values()].sort(
+            (a, b) => b.updatedAt - a.updatedAt,
+          );
+          if (active) {
+            setSavedDecks(merged);
+            writeDeckIndex(merged);
+          }
+          for (const deck of local)
+            if (
+              !remote.some(
+                (item) =>
+                  item.id === deck.id && item.updatedAt >= deck.updatedAt,
+              )
+            )
+              void syncDeck(deck);
+          return;
+        }
+      } catch {}
+      if (active)
+        setSavedDecks(local.sort((a, b) => b.updatedAt - a.updatedAt));
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
+  useEffect(() => {
+    if (!deckId) return;
+    setSyncState("saving");
+    const timer = setTimeout(() => {
+      const deck: SavedDeck = {
+        id: deckId,
+        title:
+          deckTitle ||
+          slides[0]?.title.replace("\n", " ") ||
+          "Untitled presentation",
+        updatedAt: Date.now(),
+        slides,
+      };
+      setSavedDecks((previous) => {
+        const next = [deck, ...previous.filter((x) => x.id !== deckId)];
+        writeDeckIndex(next);
+        return next;
+      });
+      void saveDeckAssets(deck);
+      void syncDeck(deck).then((ok) => setSyncState(ok ? "saved" : "offline"));
+    }, 650);
+    return () => clearTimeout(timer);
+  }, [deckId, deckTitle, slides]);
+  useEffect(() => {
+    const home = () => setView("home");
+    window.addEventListener("s2s-dashboard", home);
+    return () => window.removeEventListener("s2s-dashboard", home);
+  }, []);
+  const flash = (x: string) => {
+      setToast(x);
+      setTimeout(() => setToast(""), 2200);
+    },
+    update = (f: keyof Slide | "__patch", v: any) =>
+      setSlides((a) => {
+        setHistory((h) => [...h, a].slice(-60));
+        setFuture([]);
+        return a.map((s, i) =>
+          i === sel ? (f === "__patch" ? { ...s, ...v } : { ...s, [f]: v }) : s,
+        );
+      }),
+    undo = () =>
+      setHistory((h) => {
+        if (!h.length) return h;
+        const previous = h[h.length - 1];
+        setFuture((f) => [slides, ...f].slice(0, 60));
+        setSlides(previous);
+        return h.slice(0, -1);
+      }),
+    redo = () =>
+      setFuture((f) => {
+        if (!f.length) return f;
+        const next = f[0];
+        setHistory((h) => [...h, slides].slice(-60));
+        setSlides(next);
+        return f.slice(1);
+      });
+  function validate() {
+    try {
+      const d = JSON.parse(paste),
+        clamp = (v: any, f: number, min = 0, max = 100) =>
+          Math.max(min, Math.min(max, Number.isFinite(+v) ? +v : f)),
+        color = (v: any, f: string) =>
+          /^#[0-9a-f]{6}$/i.test(v || "") ? v : f,
+        allowedLayouts = [
+          "cover",
+          "content",
+          "number",
+          "matrix",
+          "process",
+          "cards",
+          "comparison",
+          "architecture",
+          "code",
+          "cycle",
+          "summary",
+        ],
+        allowedAnimations = [
+          "fade-up",
+          "slide-left",
+          "zoom",
+          "type-in",
+          "reveal",
+          "none",
+        ];
+      if (d.schema_version === "s2s-studio-deck-1") {
+        if (!Array.isArray(d.slides) || !d.slides.length)
+          throw new Error("The shared S2S presentation contains no slides.");
+        const imported: Slide[] = d.slides.map((slide: any, index: number) => {
+          if (
+            !slide ||
+            typeof slide.title !== "string" ||
+            typeof slide.body !== "string"
+          )
+            throw new Error(`Shared slide ${index + 1} requires title and body text.`);
+          if (
+            slide.imageData &&
+            !String(slide.imageData).startsWith("https://") &&
+            !String(slide.imageData).startsWith("/api/images/")
+          )
+            throw new Error(`Shared slide ${index + 1} contains an unsupported image URL.`);
+          return {
+            ...slide,
+            id: index + 1,
+            shapes: Array.isArray(slide.shapes) ? slide.shapes.slice(0, 40) : [],
+            images: Array.isArray(slide.images) ? slide.images.slice(0, 20) : undefined,
+          } as Slide;
+        });
+        setSlides(imported);
+        setDeckTitle(
+          typeof d.title === "string" && d.title.trim()
+            ? d.title.trim()
+            : imported[0].title,
+        );
+        setDeckId(crypto.randomUUID());
+        setError("");
+        flash("Shared S2S presentation restored");
+        setTimeout(() => setView("blueprint"), 250);
+        return;
+      }
+      if (
+        d.schema_version !== "s2s-autopilot-1" ||
+        !d.title ||
+        !Array.isArray(d.slides) ||
+        !d.slides.length
+      )
+        throw new Error(
+          "Use the S2S Autopilot JSON schema from the copied prompt.",
+        );
+      const system = d.design_system || {},
+        a: Slide[] = d.slides.map((s: any, i: number) => {
+          if (!s.title?.text || !s.body?.text || !s.purpose)
+            throw new Error(
+              `Slide ${i + 1} is missing AI title, body or purpose.`,
+            );
+          const visual = s.visual || {},
+            url =
+              typeof visual.image_url === "string" &&
+              visual.image_url.startsWith("https://")
+                ? visual.image_url
+                : undefined,
+            animation = (v: any, f: string) =>
+              allowedAnimations.includes(v) ? v : f,
+            layout = allowedLayouts.includes(s.layout) ? s.layout : "content";
+          return {
+            id: i + 1,
+            title: s.title.text,
+            tag:
+              typeof s.section_label === "string" && s.section_label.trim()
+                ? s.section_label.trim()
+                : `${String(i + 1).padStart(2, "0")} · ${layout.toUpperCase()}`,
+            body: s.body.text,
+            layout,
+            notes: s.speaker_notes || "",
+            theme: system.theme || "studio",
+            background: color(
+              s.background,
+              color(system.background, "#f7f2e9"),
+            ),
+            textColor: color(system.text_color, "#17202c"),
+            fontFamily: system.font_family || "Georgia",
+            titleX: clamp(s.title.x, 30),
+            titleY: clamp(s.title.y, 32),
+            titleW: clamp(s.title.width, 48, 15, 90),
+            titleSize: Math.min(
+              clamp(s.title.font_size, 52, 20, 72),
+              s.title.text.length > 60
+                ? 34
+                : s.title.text.length > 36
+                  ? 42
+                  : 56,
+            ),
+            bodyX: clamp(s.body.x, 30),
+            bodyY: Math.max(
+              clamp(s.body.y, 62),
+              Math.min(78, clamp(s.title.y, 32) + 24),
+            ),
+            bodyW: clamp(s.body.width, 44, 15, 90),
+            bodySize: Math.min(
+              clamp(s.body.font_size, 18, 10, 32),
+              s.body.text.length > 180
+                ? 13
+                : s.body.text.length > 100
+                  ? 16
+                  : 20,
+            ),
+            textAlign: ["left", "center", "right"].includes(s.title.align)
+              ? s.title.align
+              : "left",
+            bodyAlign: ["left", "center", "right"].includes(s.body.align)
+              ? s.body.align
+              : "left",
+            titleAnimation: animation(s.title.animation, "fade-up"),
+            bodyAnimation: animation(s.body.animation, "fade-up"),
+            imageData: url,
+            imageDescription:
+              typeof visual.image_prompt === "string" &&
+              !/^(none|no image|required)$/i.test(visual.image_prompt.trim())
+                ? visual.image_prompt
+                : "",
+            imageX: clamp(visual.x, 76),
+            imageY: clamp(visual.y, 50),
+            imageW: clamp(visual.width, 38, 10, 100),
+            imageH: clamp(visual.height, 62, 10, 100),
+            imageFit: visual.fit === "contain" ? "contain" : "cover",
+            imageOpacity: clamp(visual.opacity, 100, 10, 100),
+            motion: s.slide_transition || visual.animation || "subtle-reveal",
+            shapes: Array.isArray(s.decorations)
+              ? s.decorations.slice(0, 8).map((shape: any, j: number) => {
+                  const type = [
+                    "circle",
+                    "rectangle",
+                    "line",
+                    "symbol",
+                  ].includes(shape.type)
+                    ? shape.type
+                    : "symbol";
+                  return {
+                    id: Date.now() + i * 20 + j,
+                    type,
+                    glyph: type === "symbol" ? shape.symbol || "✦" : "",
+                    x: clamp(shape.x, 80),
+                    y: clamp(shape.y, 80),
+                    color: color(
+                      shape.color,
+                      color(system.accent_color, "#e85d3f"),
+                    ),
+                  };
+                })
+              : [],
+            aiGenerated: true,
+          };
+        });
+      setSlides(professionalizeDeck(a));
+      setDeckTitle(d.title);
+      setDeckId(crypto.randomUUID());
+      setAiLocked(true);
+      setHistory([]);
+      setFuture([]);
+      setError("");
+      flash("AI blueprint validated — review the complete AI direction");
+      setTimeout(() => setView("blueprint"), 350);
+    } catch (error) {
+      setError(
+        error instanceof Error
+          ? error.message
+          : "Invalid JSON. Copy the complete AI response and try again.",
+      );
+    }
+  }
+  function saveDeck() {
+    const id = deckId || crypto.randomUUID();
+    setDeckId(id);
+    const deck: SavedDeck = {
+      id,
+      title:
+        deckTitle ||
+        slides[0]?.title.replace("\n", " ") ||
+        "Untitled presentation",
+      updatedAt: Date.now(),
+      slides,
+    };
+    setSavedDecks((previous) => {
+      const next = [deck, ...previous.filter((x) => x.id !== id)];
+      writeDeckIndex(next);
+      return next;
+    });
+    void saveDeckAssets(deck);
+    void syncDeck(deck).then((ok) =>
+      flash(
+        ok
+          ? "Presentation synced across systems"
+          : "Saved locally — sync will retry automatically",
+      ),
+    );
+  }
+  async function deleteDeck(deck: SavedDeck) {
+    if (
+      !confirm(
+        `Delete “${deck.title}”? This removes it from every synced system.`,
+      )
+    )
+      return;
+    try {
+      const response = await fetch("/api/presentations", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: deck.id }),
+      });
+      if (!response.ok) throw new Error();
+      const next = savedDecks.filter((item) => item.id !== deck.id);
+      setSavedDecks(next);
+      writeDeckIndex(next);
+      await deleteDeckAssets(deck.id);
+      if (deckId === deck.id) setDeckId("");
+      flash("Presentation deleted from all systems");
+    } catch {
+      flash("Could not delete presentation — please try again");
+    }
+  }
+  function openDeck(deck: SavedDeck) {
+    setDeckId(deck.id);
+    setDeckTitle(deck.title);
+    setSlides(deck.slides);
+    setAiLocked(deck.slides.every((slide) => slide.aiGenerated));
+    setSel(0);
+    setView("edit");
+  }
+  useEffect(() => {
+    const k = (e: KeyboardEvent) => {
+      if (view !== "present") return;
+      if (e.key === "ArrowRight" || e.key === " ")
+        setSel((x) => Math.min(slides.length - 1, x + 1));
+      if (e.key === "ArrowLeft") setSel((x) => Math.max(0, x - 1));
+      if (e.key === "Escape") setView("edit");
+    };
+    addEventListener("keydown", k);
+    return () => removeEventListener("keydown", k);
+  }, [view, slides.length]);
+  useEffect(() => {
+    const key = (e: KeyboardEvent) => {
+      if (view !== "edit" || aiLocked) return;
+      const target = e.target as HTMLElement;
+      if (target.matches("input,textarea,select") || target.isContentEditable)
+        return;
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "z") {
+        e.preventDefault();
+        e.shiftKey ? redo() : undo();
+        return;
+      }
+      if (
+        ![
+          "ArrowLeft",
+          "ArrowRight",
+          "ArrowUp",
+          "ArrowDown",
+          "Backspace",
+          "Delete",
+        ].includes(e.key)
+      )
+        return;
+      const amount = e.shiftKey ? 5 : 1,
+        dx =
+          e.key === "ArrowLeft" ? -amount : e.key === "ArrowRight" ? amount : 0,
+        dy = e.key === "ArrowUp" ? -amount : e.key === "ArrowDown" ? amount : 0;
+      if (
+        (e.key === "Backspace" || e.key === "Delete") &&
+        cur.selectedImageId
+      ) {
+        e.preventDefault();
+        update("__patch", {
+          images: (cur.images || []).filter(
+            (image) => image.id !== cur.selectedImageId,
+          ),
+          selectedImageId: undefined,
+        });
+        return;
+      }
+      if (!dx && !dy) return;
+      e.preventDefault();
+      if (cur.selectedImageId)
+        update(
+          "images",
+          (cur.images || []).map((image) =>
+            image.id === cur.selectedImageId
+              ? {
+                  ...image,
+                  x: Math.max(0, Math.min(100, image.x + dx)),
+                  y: Math.max(0, Math.min(100, image.y + dy)),
+                }
+              : image,
+          ),
+        );
+      else if (cur.selectedBlock === "title")
+        update("__patch", {
+          titleX: (cur.titleX ?? 30) + dx,
+          titleY: (cur.titleY ?? 35) + dy,
+        });
+      else if (cur.selectedBlock === "body")
+        update("__patch", {
+          bodyX: (cur.bodyX ?? 29) + dx,
+          bodyY: (cur.bodyY ?? 62) + dy,
+        });
+      else if (cur.selectedBlock === "image")
+        update("__patch", {
+          imageX: (cur.imageX ?? 76) + dx,
+          imageY: (cur.imageY ?? 50) + dy,
+        });
+    };
+    addEventListener("keydown", key);
+    return () => removeEventListener("keydown", key);
+  }, [view, cur, undo, redo, aiLocked]);
+  if (view === "present")
+    return (
+      <div className="present">
+        <div className="presentNav">
+          <button onClick={() => setView("home")}>⌂ Dashboard</button>
+          <button onClick={() => setView("edit")}>× Exit presentation</button>
+        </div>
+        <div className="presentSlide">
+          <SlideView key={cur.id} s={cur} presenting />
+        </div>
+        <div className="controls">
+          <button disabled={!sel} onClick={() => setSel(sel - 1)}>
+            ←
+          </button>
+          <span>
+            {sel + 1} / {slides.length}
+          </span>
+          <button
+            disabled={sel === slides.length - 1}
+            onClick={() => setSel(sel + 1)}
+          >
+            →
+          </button>
+          <span>00:{String((sel + 1) * 3).padStart(2, "0")}</span>
+        </div>
+      </div>
+    );
+  function useTemplate(name: string) {
+    setSlides(slidesForTemplate(name));
+    setAiLocked(false);
+    setDeckTitle(name);
+    setDeckId(crypto.randomUUID());
+    setSel(0);
+    flash(`${name} story system applied`);
+    setView("edit");
+  }
+  function startReactVisualLesson() {
+    const deck = reactVisualLesson();
+    setSlides(deck);
+    setDeckTitle("React, Visually");
+    setDeckId(crypto.randomUUID());
+    setAiLocked(true);
+    setSel(0);
+    setHistory([]);
+    setFuture([]);
+    flash("React visual lesson ready — review the animated blueprint");
+    setView("blueprint");
+  }
+  return (
+    <main>
+      {toast && <div className="toast">✓ {toast}</div>}
+      {view === "home" && (
+        <>
+          <Home
+            create={() => setView("create")}
+            open={() => setView("edit")}
+            templates={() => setView("templates")}
+            savedDecks={savedDecks}
+            openDeck={openDeck}
+            deleteDeck={deleteDeck}
+          />
+          <button
+            className="reactLessonLaunch"
+            onClick={startReactVisualLesson}
+          >
+            <small>NEW · VISUAL LEARNING</small>
+            <b>Open the React visual lesson</b>
+            <span>Hand-drawn diagrams · typed code · live output →</span>
+          </button>
+        </>
+      )}
+      {view === "templates" && (
+        <Templates
+          home={() => setView("home")}
+          create={() => setView("create")}
+          useTemplate={useTemplate}
+        />
+      )}
+      {view === "create" && (
+        <Create
+          brief={brief}
+          setBrief={setBrief}
+          mode={mode}
+          setMode={setMode}
+          theme={theme}
+          setTheme={setTheme}
+          audience={audience}
+          setAudience={setAudience}
+          back={() => setView("home")}
+          next={() => setView("bridge")}
+        />
+      )}
+      {view === "bridge" && (
+        <Bridge
+          prompt={prompt}
+          paste={paste}
+          setPaste={setPaste}
+          error={error}
+          back={() => setView("create")}
+          copy={() => {
+            navigator.clipboard?.writeText(prompt);
+            flash("Prompt copied — paste it into ChatGPT");
+          }}
+          demo={() =>
+            setPaste(
+              JSON.stringify(
+                {
+                  title: "Convolutional Neural Networks",
+                  audience,
+                  theme: {
+                    name: theme,
+                    palette: ["#17202c", "#e85d3f", "#f7f2e9"],
+                    typography: "Editorial serif with neutral sans",
+                    image_style: "Clean technical editorial",
+                  },
+                  objectives: [
+                    "Build visual intuition",
+                    "Apply the concept in code",
+                  ],
+                  slides: starter.map((s) => ({
+                    title: s.title,
+                    purpose: s.tag,
+                    layout: s.layout,
+                    key_message: s.body,
+                    image_description: `Professional editorial illustration for ${s.title.replace("\n", " ")}, clean ${theme} palette, generous negative space, no text or watermark`,
+                    motion:
+                      s.layout === "architecture"
+                        ? "diagram sequence"
+                        : "subtle reveal",
+                    speaker_notes: s.notes,
+                  })),
+                },
+                null,
+                2,
+              ),
+            )
+          }
+          validate={validate}
+        />
+      )}
+      {view === "blueprint" && (
+        <Blueprint
+          aiLocked={aiLocked}
+          title={deckTitle}
+          slides={slides}
+          setSlides={setSlides}
+          back={() => setView("bridge")}
+          next={() => setView("edit")}
+        />
+      )}
+      {view === "edit" && (
+        <Editor
+          aiLocked={aiLocked}
+          title={deckTitle}
+          slides={slides}
+          sel={sel}
+          setSel={setSel}
+          cur={cur}
+          update={update}
+          tab={tab}
+          setTab={setTab}
+          blueprint={() => setView("blueprint")}
+          save={saveDeck}
+          present={() => setView("present")}
+          add={() => {
+            setSlides([
+              ...slides,
+              {
+                id: slides.length + 1,
+                title: "Untitled idea",
+                tag: "NEW SLIDE",
+                body: "Start with one clear message.",
+                layout: "content",
+                notes: "",
+                shapes: [],
+              },
+            ]);
+            setSel(slides.length);
+          }}
+          flash={flash}
+          undo={undo}
+          redo={redo}
+          canUndo={!!history.length}
+          canRedo={!!future.length}
+          syncState={syncState}
+        />
+      )}
+    </main>
+  );
+}
+function Side({
+  active = "Home",
+  home,
+  templates,
+}: {
+  active?: string;
+  home?: () => void;
+  templates?: () => void;
+}) {
+  const [accountOpen, setAccountOpen] = useState(false);
+  return (
+    <aside className="side">
+      <Logo />
+      <div className="workspaceSwitch">
+        <span>PERSONAL WORKSPACE</span>
+        <button>
+          Srikanth’s studio <b>⌄</b>
+        </button>
+      </div>
+      <nav>
+        <small>WORKSPACE</small>
+        <button className={active === "Home" ? "on" : ""} onClick={home}>
+          ⌂ <span>Home</span>
+        </button>
+        <button
+          className={active === "Templates" ? "on" : ""}
+          onClick={templates}
+        >
+          ◇ <span>Templates</span>
+          <em>24</em>
+        </button>
+        <button>
+          ✦ <span>Brand kit</span>
+        </button>
+        <button>
+          ▧ <span>Assets</span>
+        </button>
+      </nav>
+      <footer>
+        <div className="upgrade">
+          <small>FREE PLAN</small>
+          <b>Unlock your full studio</b>
+          <span>More exports, themes and storage.</span>
+          <button>View plans →</button>
+        </div>
+        <div className="accountWrap">
+          {accountOpen && (
+            <div className="accountMenu">
+              <header>
+                <i>SR</i>
+                <span>
+                  <b>Srikanth</b>
+                  <small>srikanth@s2s.studio</small>
+                </span>
+              </header>
+              <div>
+                <button onClick={toggleAppearance}>
+                  <i>◐</i>
+                  <span>Appearance</span>
+                  <kbd>Toggle theme</kbd>
+                </button>
+                <button>
+                  <i>♢</i>
+                  <span>Notifications</span>
+                  <em>1 new</em>
+                </button>
+                <button>
+                  <i>⚙</i>
+                  <span>Account settings</span>
+                  <b>→</b>
+                </button>
+              </div>
+              <footer>
+                <button onClick={logout}>
+                  <i>↪</i>
+                  <span>Logout</span>
+                </button>
+              </footer>
+            </div>
+          )}
+          <button
+            className={accountOpen ? "user accountOpen" : "user"}
+            onClick={() => setAccountOpen(!accountOpen)}
+            aria-expanded={accountOpen}
+          >
+            <i>SR</i>
+            <span>
+              <b>Srikanth</b>
+              <small>Personal workspace</small>
+            </span>
+            <em>{accountOpen ? "⌄" : "•••"}</em>
+          </button>
+        </div>
+      </footer>
+    </aside>
+  );
+}
+function Home({
+  create,
+  open,
+  templates,
+  savedDecks,
+  openDeck,
+  deleteDeck,
+}: {
+  create: () => void;
+  open: () => void;
+  templates: () => void;
+  savedDecks: SavedDeck[];
+  openDeck: (d: SavedDeck) => void;
+  deleteDeck: (d: SavedDeck) => void;
+}) {
+  const samples = [
+    ["Convolutional Neural Networks", "Teaching · 10 slides", "CNNs", "coral"],
+    ["React Hooks Workshop", "Workshop · 18 slides", "useEffect( )", "navy"],
+    ["AI Product Launch", "Marketing · 12 slides", "Make it matter.", "lime"],
+  ];
+  return (
+    <>
+      <Side active="Home" home={() => {}} templates={templates} />
+      <section className="home">
+        <div className="homeBody">
+          <div className="welcome">
+            <div>
+              <small>YOUR PRESENTATION STUDIO</small>
+              <h1>Good evening, Srikanth.</h1>
+              <p>Turn your next idea into something worth showing.</p>
+            </div>
+            <button className="primary" onClick={create}>
+              <span>＋</span> Create presentation <em>⌘ N</em>
+            </button>
+          </div>
+          <div className="dashboardSearch search">
+            ⌕{" "}
+            <input
+              placeholder="Search your presentations and templates"
+              aria-label="Search presentations and templates"
+            />
+            <kbd>⌘ K</kbd>
+          </div>
+          <Title
+            over="PICK UP WHERE YOU LEFT OFF"
+            title="Recent presentations"
+          />
+          <div className="cards">
+            {savedDecks.map((d, i) => (
+              <article className="savedCard" key={d.id}>
+                <button className="savedCardOpen" onClick={() => openDeck(d)}>
+                  <div
+                    className={`cover ${["navy", "coral", "violet", "lime"][i % 4]}`}
+                  >
+                    <small>
+                      SAVED • {String(d.slides.length).padStart(2, "0")} SLIDES
+                    </small>
+                    <b>{d.title.slice(0, 28)}</b>
+                    <span>Open in presentation editor</span>
+                    <i className="coverBadge">S2S</i>
+                  </div>
+                  <div className="meta">
+                    <b>{d.title}</b>
+                    <span>•••</span>
+                    <small>{d.slides.length} slides</small>
+                    <small>
+                      Saved {new Date(d.updatedAt).toLocaleDateString()}
+                    </small>
+                  </div>
+                </button>
+                <button
+                  className="deletePresentation"
+                  onClick={() => deleteDeck(d)}
+                  title="Delete presentation"
+                  aria-label={`Delete ${d.title}`}
+                >
+                  ⌫
+                </button>
+              </article>
+            ))}
+            {samples
+              .slice(0, Math.max(1, 4 - savedDecks.length))
+              .map((c, i) => (
+                <button key={c[0]} onClick={i ? undefined : open}>
+                  <div className={`cover ${c[3]}`}>
+                    <small>STORY • 0{i + 1}</small>
+                    <b>{c[2]}</b>
+                    <span>Something worth showing</span>
+                    <i className="coverBadge">
+                      {i === 0 ? "EDU" : i === 1 ? "DEV" : "MKT"}
+                    </i>
+                  </div>
+                  <div className="meta">
+                    <b>{c[0]}</b>
+                    <span>•••</span>
+                    <small>{c[1]}</small>
+                    <small>Example presentation</small>
+                  </div>
+                </button>
+              ))}
+          </div>
+          <div className="homeGrid">
+            <section>
+              <Title title="Start with a format" />
+              <div className="formats">
+                {modes.slice(0, 6).map((x, i) => (
+                  <button key={x} onClick={create}>
+                    <i>{["◎", "</>", "↗", "▦", "⌁", "✣"][i]}</i>
+                    <b>{x}</b>
+                    <span>→</span>
+                  </button>
+                ))}
+              </div>
+            </section>
+            <section className="ideas">
+              <small>✦ AI IDEAS</small>
+              <h2>A little spark?</h2>
+              <p>Start with a thought. S2S will shape the story.</p>
+              {[
+                "Turn course notes into a lecture",
+                "Create a hands-on coding workshop",
+                "Transform a report into a story",
+              ].map((x) => (
+                <button onClick={create} key={x}>
+                  {x}
+                  <span>↗</span>
+                </button>
+              ))}
+            </section>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+function Templates({
+  home,
+  create,
+  useTemplate,
+}: {
+  home: () => void;
+  create: () => void;
+  useTemplate: (x: string) => void;
+}) {
+  const [filter, setFilter] = useState("All");
+  const list = [
+    [
+      "Visual Classroom",
+      "Teaching",
+      "Explain complex ideas with diagrams and progressive reveals.",
+      "coral",
+      "10",
+    ],
+    [
+      "Developer Workshop",
+      "Coding",
+      "Code-first lessons with exercises and architecture flows.",
+      "navy",
+      "14",
+    ],
+    [
+      "Product Narrative",
+      "Marketing",
+      "A confident launch story built around one memorable idea.",
+      "lime",
+      "12",
+    ],
+    [
+      "Institutional Showcase",
+      "Marketing",
+      "Campus story, programs, student experience and outcomes with evidence-led visual storytelling.",
+      "campus",
+      "8",
+    ],
+    [
+      "KMTI Parents Presentation",
+      "Marketing",
+      "Complete 38-slide reference presentation, preserved for editing and presenting inside S2S Studio.",
+      "campus",
+      "38",
+    ],
+    [
+      "Executive Review",
+      "Business",
+      "Crisp performance updates, decisions and next actions.",
+      "violet",
+      "16",
+    ],
+    [
+      "Research Brief",
+      "Research",
+      "Evidence-led findings with methodology and conclusions.",
+      "paper",
+      "13",
+    ],
+    [
+      "Founder Pitch",
+      "Pitch Deck",
+      "Problem, opportunity, traction and an investable vision.",
+      "midnight",
+      "11",
+    ],
+    [
+      "Editorial Keynote",
+      "Professional",
+      "Large ideas, elegant pacing and cinematic whitespace.",
+      "sand",
+      "9",
+    ],
+    [
+      "Hands-on Lab",
+      "Workshop",
+      "Teach, demonstrate, practice and reflect in each chapter.",
+      "blue",
+      "15",
+    ],
+  ];
+  const shown = filter === "All" ? list : list.filter((x) => x[1] === filter);
+  return (
+    <>
+      <Side active="Templates" home={home} templates={() => {}} />
+      <section className="home templatePage">
+        <header>
+          <div className="search">
+            ⌕ <input placeholder="Search templates" />
+            <kbd>⌘ K</kbd>
+          </div>
+          <button>◐</button>
+          <i>SR</i>
+        </header>
+        <div className="templateBody">
+          <div className="templateHero">
+            <div>
+              <small>CURATED BY S2S</small>
+              <h1>
+                Start with a story
+                <br />
+                system, not a blank slide.
+              </h1>
+              <p>
+                Professionally structured templates with smart layouts and
+                content-aware motion.
+              </p>
+            </div>
+            <button className="primary" onClick={create}>
+              ＋ Create from scratch
+            </button>
+          </div>
+          <div className="templateFilters">
+            {[
+              "All",
+              "Teaching",
+              "Coding",
+              "Marketing",
+              "Business",
+              "Research",
+              "Pitch Deck",
+              "Workshop",
+            ].map((x) => (
+              <button
+                className={filter === x ? "on" : ""}
+                onClick={() => setFilter(x)}
+                key={x}
+              >
+                {x}
+              </button>
+            ))}
+          </div>
+          <div className="templateGrid">
+            {shown.map((t, i) => (
+              <article className="templateCard" key={t[0]}>
+                <div className={`templatePreview ${t[3]}`}>
+                  <div className="templateChrome">
+                    <span>S2S</span>
+                    <small>0{i + 1}</small>
+                  </div>
+                  <b>{t[0]}</b>
+                  <p>{t[1]}</p>
+                  <i>{i % 3 === 0 ? "◯" : i % 3 === 1 ? "〈 / 〉" : "↗"}</i>
+                  <button onClick={() => useTemplate(t[0])}>
+                    Use template →
+                  </button>
+                </div>
+                <div className="templateInfo">
+                  <span>
+                    <b>{t[0]}</b>
+                    <small>
+                      {t[1]} · {t[4]} slides
+                    </small>
+                  </span>
+                  <button onClick={() => useTemplate(t[0])}>＋</button>
+                </div>
+                <p>{t[2]}</p>
+              </article>
+            ))}
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+function Title({ over, title }: { over?: string; title: string }) {
+  return (
+    <div className="title">
+      {over && <small>{over}</small>}
+      <h2>{title}</h2>
+      <button>View all →</button>
+    </div>
+  );
+}
+function Top({ back }: { back: () => void }) {
+  return (
+    <header className="top">
+      <Logo />
+      <button onClick={back}>← Back</button>
+    </header>
+  );
+}
+function Create({
+  brief,
+  setBrief,
+  mode,
+  setMode,
+  theme,
+  setTheme,
+  audience,
+  setAudience,
+  back,
+  next,
+}: any) {
+  const themes = [
+    ["Modern Coral", "#ef6b43", "#fff4ef"],
+    ["Technical Blue", "#7189e8", "#172033"],
+    ["Fresh Lime", "#d6e872", "#304016"],
+    ["Executive Violet", "#9277d2", "#272034"],
+    ["Research Paper", "#b79a78", "#f0e9dd"],
+    ["Midnight", "#182132", "#79a8ff"],
+    ["Editorial Sand", "#d9b995", "#5d402f"],
+    ["Workshop Sky", "#b8dbea", "#25758f"],
+  ];
+  const toggle = (x: string) =>
+    setMode(
+      mode.includes(x) ? mode.filter((v: string) => v !== x) : [...mode, x],
+    );
+  return (
+    <>
+      <Top back={back} />
+      <div className="create createFlow">
+        <small>01 / 03 · CREATIVE DIRECTION</small>
+        <h1>
+          Design the story
+          <br />
+          before the <em>slides.</em>
+        </h1>
+        <p>
+          Choose a visual voice, describe the topic, then combine the
+          presentation approaches you need.
+        </p>
+        <section className="creationSection">
+          <div className="creationHeading">
+            <i>1</i>
+            <span>
+              <b>Choose a visual theme</b>
+              <small>
+                Palette, typography and image direction stay consistent across
+                the deck.
+              </small>
+            </span>
+          </div>
+          <div className="themeChoices">
+            {themes.map((t) => (
+              <button
+                className={theme === t[0] ? "on" : ""}
+                onClick={() => setTheme(t[0])}
+                key={t[0]}
+              >
+                <i
+                  style={{
+                    background: `linear-gradient(135deg,${t[1]} 0 52%,${t[2]} 52%)`,
+                  }}
+                />
+                <span>
+                  <b>{t[0]}</b>
+                  <small>
+                    {t[1]} · {t[2]}
+                  </small>
+                </span>
+                <em>{theme === t[0] ? "✓" : ""}</em>
+              </button>
+            ))}
+          </div>
+        </section>
+        <section className="creationSection">
+          <div className="creationHeading">
+            <i>2</i>
+            <span>
+              <b>Describe your topic</b>
+              <small>
+                Include the subject, desired outcome and any must-cover ideas.
+              </small>
+            </span>
+          </div>
+          <div className="brief">
+            <textarea
+              value={brief}
+              onChange={(e) => setBrief(e.target.value)}
+              placeholder="Example: Teach convolutional neural networks with practical Python examples…"
+            />
+            <footer>
+              <span>
+                {brief.length} characters · AI uses this as the source brief
+              </span>
+            </footer>
+          </div>
+        </section>
+        <section className="creationSection">
+          <div className="creationHeading">
+            <i>3</i>
+            <span>
+              <b>Combine presentation types</b>
+              <small>
+                Select one or several. S2S will blend their strengths into one
+                coherent narrative.
+              </small>
+            </span>
+          </div>
+          <div className="pills multiPills">
+            {modes.map((x) => (
+              <button
+                className={mode.includes(x) ? "on" : ""}
+                onClick={() => toggle(x)}
+                key={x}
+              >
+                {mode.includes(x) ? "✓ " : "＋ "}
+                {x}
+              </button>
+            ))}
+          </div>
+        </section>
+        <section className="creationSection audienceSection">
+          <div className="creationHeading">
+            <i>4</i>
+            <span>
+              <b>Choose the audience</b>
+              <small>
+                Content depth, terminology and examples will adapt
+                automatically.
+              </small>
+            </span>
+          </div>
+          <div className="audienceGrid">
+            {[
+              "General audience",
+              "School students",
+              "University students",
+              "Engineering students",
+              "Developers & architects",
+              "Executives & leaders",
+              "Customers & prospects",
+              "Researchers & academics",
+            ].map((x) => (
+              <button
+                className={audience === x ? "on" : ""}
+                onClick={() => setAudience(x)}
+                key={x}
+              >
+                {x}
+                <span>{audience === x ? "✓" : ""}</span>
+              </button>
+            ))}
+          </div>
+        </section>
+        <footer className="createAction">
+          <span>
+            <b>{theme}</b>
+            <small>
+              {mode.length ? mode.join(" + ") : "Choose at least one type"} ·{" "}
+              {audience}
+            </small>
+          </span>
+          <button
+            className="primary"
+            disabled={!brief.trim() || !mode.length}
+            onClick={next}
+          >
+            Create AI prompt →
+          </button>
+        </footer>
+      </div>
+    </>
+  );
+}
+function Bridge({
+  prompt,
+  paste,
+  setPaste,
+  error,
+  back,
+  copy,
+  demo,
+  validate,
+}: any) {
+  return (
+    <>
+      <Top back={back} />
+      <div className="bridge">
+        <small>02 / 03 · AI HANDOFF</small>
+        <h1>
+          Bring the intelligence.
+          <br />
+          <em>Keep the control.</em>
+        </h1>
+        <p>
+          No API key needed. Copy our prompt to ChatGPT, then paste its JSON
+          answer back. S2S renders every AI decision automatically.
+        </p>
+        <div className="handoff">
+          <section>
+            <i>1</i>
+            <header>
+              <span>
+                <b>Copy the JSON prompt</b>
+                <small>Structured for reliable output</small>
+              </span>
+              <button onClick={copy}>⧉ Copy JSON</button>
+            </header>
+            <pre>{prompt}</pre>
+            <a href="https://chatgpt.com" target="_blank">
+              Open ChatGPT ↗
+            </a>
+          </section>
+          <strong>→</strong>
+          <section>
+            <i>2</i>
+            <header>
+              <span>
+                <b>Paste ChatGPT or Claude response</b>
+                <small>Validated, then rendered without editing</small>
+              </span>
+              <button onClick={demo}>Use demo</button>
+            </header>
+            <textarea
+              value={paste}
+              onChange={(e) => setPaste(e.target.value)}
+              placeholder={
+                'Paste JSON here…\n\n{ "title": "…", "slides": […] }'
+              }
+            />
+            {error && <p className="error">{error}</p>}
+            <button className="primary" disabled={!paste} onClick={validate}>
+              Validate & let AI build the show →
+            </button>
+          </section>
+        </div>
+        <footer>
+          ◈ Your AI JSON is validated locally, then the presentation syncs
+          securely across your S2S systems.
+        </footer>
+      </div>
+    </>
+  );
+}
+function Blueprint({ aiLocked, title, slides, setSlides, back, next }: any) {
+  const [preview, setPreview] = useState<number | null>(null),
+    [jsonSlide, setJsonSlide] = useState<number | null>(null),
+    [jsonText, setJsonText] = useState(""),
+    [jsonError, setJsonError] = useState(""),
+    [regenReady, setRegenReady] = useState(false),
+    [deckCopied, setDeckCopied] = useState(false),
+    openJson = (i: number, regenerate = false) => {
+      setJsonSlide(i);
+      setJsonText(JSON.stringify(slides[i], null, 2));
+      setJsonError("");
+      setRegenReady(regenerate);
+    },
+    regenerate = (i: number) => {
+      const slide = slides[i],
+        instruction = {
+          role: "Expert S2S slide director",
+          task: "Regenerate this single slide. Improve clarity, visual hierarchy, image direction and animation. Return only one valid JSON object using exactly the same keys and value types as current_slide. Keep coordinates as percentages and prevent overlaps.",
+          current_slide: slide,
+        };
+      navigator.clipboard?.writeText(JSON.stringify(instruction, null, 2));
+      openJson(i, true);
+    },
+    applyJson = () => {
+      try {
+        if (jsonSlide === null) return;
+        const parsed = JSON.parse(jsonText);
+        if (
+          !parsed ||
+          typeof parsed.title !== "string" ||
+          typeof parsed.body !== "string" ||
+          !parsed.title.trim() ||
+          !parsed.body.trim()
+        )
+          throw new Error(
+            "Slide JSON requires non-empty title and body strings.",
+          );
+        if (
+          parsed.imageData &&
+          !(
+            String(parsed.imageData).startsWith("https://") ||
+            String(parsed.imageData).startsWith("/api/images/")
+          )
+        )
+          throw new Error(
+            "imageData must be an HTTPS URL or an uploaded S2S image URL.",
+          );
+        const current = slides[jsonSlide],
+          next = {
+            ...current,
+            ...parsed,
+            id: current.id,
+            aiGenerated: current.aiGenerated,
+            shapes: Array.isArray(parsed.shapes)
+              ? parsed.shapes.slice(0, 8)
+              : current.shapes,
+            images: Array.isArray(parsed.images)
+              ? parsed.images.slice(0, 8)
+              : current.images,
+          };
+        setSlides((all: Slide[]) =>
+          all.map((slide: Slide, index: number) =>
+            index === jsonSlide ? next : slide,
+          ),
+        );
+        setJsonSlide(null);
+        setJsonError("");
+        setRegenReady(false);
+      } catch (error) {
+        setJsonError(
+          error instanceof Error ? error.message : "Invalid slide JSON.",
+        );
+      }
+    },
+    professionalize = (i: number) =>
+      setSlides((all: Slide[]) =>
+        [
+          ...all.slice(0, i),
+          ...professionalizeSlide(all[i]),
+          ...all.slice(i + 1),
+        ].map((slide, index) => ({ ...slide, id: index + 1 })),
+      ),
+    upload = async (i: number, file?: File) => {
+      if (!file) return;
+      try {
+        const imageData = await uploadPng(file);
+        setSlides((current: Slide[]) =>
+          current.map((s: Slide, j: number) =>
+            j === i ? { ...s, imageData } : s,
+          ),
+        );
+      } catch (error) {
+        alert(error instanceof Error ? error.message : "Image upload failed");
+      }
+    },
+    createSlide = (): Slide => ({
+      id: Date.now() + Math.random(),
+      title: "New slide",
+      tag: "NEW IDEA",
+      body: "Add your key message",
+      layout: "content",
+      notes: "",
+      theme: slides[0]?.theme || "studio",
+      background: slides[0]?.background || "#f7f2e9",
+      textColor: slides[0]?.textColor || "#17202c",
+      imageDescription: "",
+      motion: "subtle reveal",
+      shapes: [],
+      aiGenerated: false,
+    }),
+    copyDeckJson = async () => {
+      const portableDeck = {
+        schema_version: "s2s-studio-deck-1",
+        title: title || slides[0]?.title || "Untitled presentation",
+        slides,
+      };
+      await navigator.clipboard.writeText(JSON.stringify(portableDeck, null, 2));
+      setDeckCopied(true);
+      window.setTimeout(() => setDeckCopied(false), 2200);
+    },
+    insertSlide = (index: number) =>
+      setSlides((all: Slide[]) =>
+        [...all.slice(0, index), createSlide(), ...all.slice(index)].map(
+          (slide, slideIndex) => ({ ...slide, id: slideIndex + 1 }),
+        ),
+      );
+  return (
+    <>
+      {preview !== null && slides[preview] && (
+        <div className="blueprintFullscreen" role="dialog" aria-modal="true">
+          <header>
+            <span>
+              <b>Slide {preview + 1}</b>
+              <small>{slides[preview].tag}</small>
+            </span>
+            <button onClick={() => setPreview(null)}>× Close</button>
+          </header>
+          <div>
+            <SlideView s={slides[preview]} />
+          </div>
+          <footer>
+            <button
+              disabled={!preview}
+              onClick={() => setPreview(Math.max(0, preview - 1))}
+            >
+              ← Previous
+            </button>
+            <span>
+              {preview + 1} / {slides.length}
+            </span>
+            <button
+              disabled={preview === slides.length - 1}
+              onClick={() =>
+                setPreview(Math.min(slides.length - 1, preview + 1))
+              }
+            >
+              Next →
+            </button>
+          </footer>
+        </div>
+      )}
+      {jsonSlide !== null && (
+        <div className="slideJsonModal" role="dialog" aria-modal="true">
+          <section>
+            <header>
+              <span>
+                <small>
+                  {regenReady ? "REGENERATION PROMPT COPIED" : "SLIDE JSON"}
+                </small>
+                <h2>
+                  {regenReady
+                    ? "Paste the regenerated slide"
+                    : "Edit slide JSON"}
+                </h2>
+              </span>
+              <button onClick={() => setJsonSlide(null)}>×</button>
+            </header>
+            {regenReady && (
+              <p>
+                Paste this slide into ChatGPT or Claude, then replace the JSON
+                below with its single-slide response.
+              </p>
+            )}
+            <textarea
+              value={jsonText}
+              onChange={(e) => setJsonText(e.target.value)}
+              spellCheck={false}
+            />
+            {jsonError && <p className="jsonError">{jsonError}</p>}
+            <footer>
+              <button onClick={() => setJsonSlide(null)}>Cancel</button>
+              <button className="primary" onClick={applyJson}>
+                Validate & apply slide
+              </button>
+            </footer>
+          </section>
+        </div>
+      )}
+      <header className="blueTop">
+        <Logo />
+        <span>Visual blueprint</span>
+        <div>
+          <button onClick={copyDeckJson}>
+            {deckCopied ? "✓ Presentation JSON copied" : "⌘ Copy presentation JSON"}
+          </button>
+          <button onClick={back}>← Revise prompt</button>
+          <button className="primary" onClick={next}>
+            {aiLocked ? "Approve AI show →" : "Build presentation →"}
+          </button>
+        </div>
+      </header>
+      <div className={`blue visualBlueprint ${aiLocked ? "aiBlueprint" : ""}`}>
+        <aside>
+          <small>VALIDATED AI BLUEPRINT</small>
+          <h1>{slides[0]?.title || "Your presentation"}</h1>
+          <dl>
+            <dt>Slides</dt>
+            <dd>{slides.length}</dd>
+            <dt>Images added</dt>
+            <dd>
+              {slides.filter((s: Slide) => s.imageData).length} /{" "}
+              {slides.length}
+            </dd>
+            <dt>Motion plans</dt>
+            <dd>{slides.filter((s: Slide) => s.motion).length} ready</dd>
+          </dl>
+          <h3>Image workflow</h3>
+          <ol className="imageSteps">
+            <li>Copy the image direction</li>
+            <li>Generate it in your preferred AI image tool</li>
+            <li>Download and upload it to the matching slide</li>
+          </ol>
+          <button
+            onClick={() =>
+              setSlides((all: Slide[]) => professionalizeDeck(all))
+            }
+          >
+            ✦ Professionalize all slides
+          </button>
+        </aside>
+        <section>
+          <Title
+            over="PRESENTATION FLOW"
+            title={`${slides.length} slides · visual and motion ready`}
+          />
+          {slides.map((s: Slide, i: number) => (
+            <div className="blueprintSlideGroup" key={s.id}>
+              <button
+                className="slideInsert"
+                onClick={() => insertSlide(i)}
+                aria-label={
+                  i === 0 ? "Insert slide at the top" : `Insert slide ${i + 1}`
+                }
+              >
+                <span>＋</span>
+                {i === 0 ? "Insert at top" : "Insert slide here"}
+              </button>
+              <article className="blueprintRow">
+                <div className="blueprintMain">
+                  <i>⠿</i>
+                  <b>{String(i + 1).padStart(2, "0")}</b>
+                  <span>
+                    <input
+                      value={s.title.replace("\n", " ")}
+                      onChange={(e) =>
+                        setSlides(
+                          slides.map((x: Slide, j: number) =>
+                            j === i ? { ...x, title: e.target.value } : x,
+                          ),
+                        )
+                      }
+                    />
+                    <small>{s.tag}</small>
+                  </span>
+                  <em>{s.layout}</em>
+                  <button
+                    onClick={() =>
+                      setSlides(slides.filter((_: Slide, j: number) => j !== i))
+                    }
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="slideRowActions">
+                  <button onClick={() => setPreview(i)}>⛶ Fullscreen</button>
+                  <button onClick={() => openJson(i)}>⌘ JSON</button>
+                  <button onClick={() => professionalize(i)}>
+                    ◇ Professionalize
+                  </button>
+                  <button onClick={() => regenerate(i)}>✦ Regenerate</button>
+                  <button
+                    className="danger"
+                    onClick={() => {
+                      if (confirm(`Remove slide ${i + 1}?`))
+                        setSlides((all: Slide[]) =>
+                          all.filter((_: Slide, index: number) => index !== i),
+                        );
+                    }}
+                  >
+                    × Remove
+                  </button>
+                </div>
+                {aiLocked && (
+                  <div className="aiBlueprintPreview">
+                    <SlideView s={s} />
+                  </div>
+                )}
+                <div className="visualBrief">
+                  <span>
+                    <b>▧ Image direction</b>
+                    <small>
+                      {s.imageDescription ||
+                        "AI chose a text-led slide; no image is required."}
+                    </small>
+                    {s.imageDescription && (
+                      <div className="imagePromptActions">
+                        <button
+                          onClick={() =>
+                            navigator.clipboard?.writeText(
+                              s.imageDescription || "",
+                            )
+                          }
+                        >
+                          ⧉ Copy image prompt
+                        </button>
+                        <label
+                          className={
+                            s.imageData ? "imageUpload added" : "imageUpload"
+                          }
+                        >
+                          {s.imageData
+                            ? "✓ Replace uploaded image"
+                            : "↑ Upload generated image"}
+                          <input
+                            type="file"
+                            accept="image/png,image/jpeg,image/webp"
+                            onChange={(e) => upload(i, e.target.files?.[0])}
+                          />
+                        </label>
+                      </div>
+                    )}
+                  </span>
+                  <span>
+                    <b>✦ Motion</b>
+                    <small>{s.motion || "Subtle reveal"}</small>
+                    {s.imageData && (
+                      <img
+                        className="blueprintThumb"
+                        src={s.imageData}
+                        alt="Uploaded slide visual"
+                      />
+                    )}
+                  </span>
+                </div>
+              </article>
+            </div>
+          ))}
+          <button
+            className="slideInsert slideInsertBottom"
+            onClick={() => insertSlide(slides.length)}
+          >
+            <span>＋</span> Insert at bottom
+          </button>
+        </section>
+      </div>
+    </>
+  );
+}
+function Editor({
+  aiLocked,
+  title,
+  slides,
+  sel,
+  setSel,
+  cur,
+  update,
+  tab,
+  setTab,
+  blueprint,
+  save,
+  present,
+  add,
+  flash,
+  undo,
+  redo,
+  canUndo,
+  canRedo,
+  syncState,
+}: any) {
+  const [leftCollapsed, setLeftCollapsed] = useState(false),
+    [rightCollapsed, setRightCollapsed] = useState(false),
+    [notesCollapsed, setNotesCollapsed] = useState(false);
+  const upload = async (file?: File) => {
+      if (!file) return;
+      try {
+        flash("Compressing and uploading PNG…");
+        const src = await uploadPng(file);
+        update("images", [
+          ...(cur.images || []),
+          { id: Date.now(), src, x: 70, y: 50, w: 34, h: 52 },
+        ]);
+        flash("Image added and synced");
+      } catch (error) {
+        flash(error instanceof Error ? error.message : "Image upload failed");
+      }
+    },
+    replaceImage = async (file?: File) => {
+      if (!file) return;
+      try {
+        flash("Compressing and uploading PNG…");
+        const src = await uploadPng(file);
+        if (cur.selectedImageId)
+          update(
+            "images",
+            (cur.images || []).map((image: CanvasImage) =>
+              image.id === cur.selectedImageId ? { ...image, src } : image,
+            ),
+          );
+        else update("imageData", src);
+        flash("Image replaced and synced");
+      } catch (error) {
+        flash(error instanceof Error ? error.message : "Image upload failed");
+      }
+    };
+  const shape = (type: Shape["type"]) =>
+    update("shapes", [
+      ...(cur.shapes || []),
+      { id: Date.now(), type, x: 68, y: 62, color: "#e85d3f" },
+    ]);
+  const moveShape = (id: number, cx: number, cy: number) => {
+    const el = document
+      .querySelector(".editor .slide")
+      ?.getBoundingClientRect();
+    if (!el) return;
+    update(
+      "shapes",
+      (cur.shapes || []).map((s: Shape) =>
+        s.id === id
+          ? {
+              ...s,
+              x: Math.max(4, Math.min(92, ((cx - el.left) / el.width) * 100)),
+              y: Math.max(5, Math.min(90, ((cy - el.top) / el.height) * 100)),
+            }
+          : s,
+      ),
+    );
+  };
+  return (
+    <div className={`editor ${aiLocked ? "aiLocked" : ""} ${leftCollapsed ? "leftCollapsed" : ""} ${rightCollapsed ? "rightCollapsed" : ""} ${notesCollapsed ? "notesCollapsed" : ""}`}>
+      <header>
+        <Logo />
+        <div className="doc">
+          <b>{title}</b>
+          <small className={`syncStatus ${syncState}`}>
+            {syncState === "saving"
+              ? "● Saving changes…"
+              : syncState === "offline"
+                ? "● Offline · saved locally"
+                : "✓ Saved and synced"}
+          </small>
+        </div>
+        <nav>
+          <button className="blueprintBack" onClick={blueprint}>
+            ← Visual blueprint
+          </button>
+          <span className="historyControls">
+            <button disabled={!canUndo} onClick={undo} title="Undo (⌘Z)">
+              ↶
+            </button>
+            <button disabled={!canRedo} onClick={redo} title="Redo (⇧⌘Z)">
+              ↷
+            </button>
+          </span>
+        </nav>
+        <div>
+          <button onClick={save}>Save</button>
+          <button
+            onClick={() => flash("Review score: 89 · Strong audience fit")}
+          >
+            Review
+          </button>
+          <button onClick={present}>▷ Present</button>
+          <button>Share</button>
+          <button
+            className="darkBtn"
+            onClick={() => flash("Export ready: PDF, PPTX or PNG")}
+          >
+            Export⌄
+          </button>
+        </div>
+      </header>
+      <div className="workspace">
+        <aside className="slides">
+          <div>
+            <b>Slides</b>
+            <span>{slides.length}</span>
+          </div>
+          <section>
+            {slides.map((s: Slide, i: number) => (
+              <button
+                className={i === sel ? "on" : ""}
+                onClick={() => setSel(i)}
+                key={s.id}
+              >
+                <b>{i + 1}</b>
+                <div
+                  className={`mini ${s.layout} theme-${s.theme || "studio"}`}
+                >
+                  <small>{s.tag}</small>
+                  <strong>{s.title.replace("\n", " ")}</strong>
+                </div>
+              </button>
+            ))}
+          </section>
+          <button onClick={add}>＋ Add slide</button>
+        </aside>
+        <section className="stage">
+          <div className="toolbar editorTools canvaTools">
+            <div className="panelControls">
+              <button onClick={() => setLeftCollapsed((value) => !value)} title="Toggle slide panel">{leftCollapsed ? "☰ Slides" : "◀ Slides"}</button>
+              <button onClick={() => setRightCollapsed((value) => !value)} title="Toggle inspector panel">{rightCollapsed ? "Inspector ☰" : "Inspector ▶"}</button>
+              <button onClick={() => setNotesCollapsed((value) => !value)} title="Toggle speaker notes">{notesCollapsed ? "Notes ▲" : "Notes ▼"}</button>
+            </div>
+            {cur.visualLesson?.mode === "diagram" && (
+              <div className="diagramToolbarTop">
+                <DiagramTools lesson={cur.visualLesson} update={update} />
+                <SvgDrawingUpload update={update} />
+              </div>
+            )}
+            <div className="toolGroup">
+              <select
+                title="Font family"
+                value={cur.fontFamily || "Georgia"}
+                onChange={(e) => update("fontFamily", e.target.value)}
+              >
+                <option>Georgia</option>
+                <option>Arial</option>
+                <option>Helvetica</option>
+                <option>Courier New</option>
+                <option>Trebuchet MS</option>
+              </select>
+              <label>
+                Title{" "}
+                <input
+                  className="sizeInput"
+                  type="number"
+                  min="24"
+                  max="96"
+                  value={cur.titleSize || 43}
+                  onChange={(e) => update("titleSize", +e.target.value)}
+                />
+              </label>
+              <label>
+                Body{" "}
+                <input
+                  className="sizeInput"
+                  type="number"
+                  min="10"
+                  max="48"
+                  value={cur.bodySize || 14}
+                  onChange={(e) => update("bodySize", +e.target.value)}
+                />
+              </label>
+              <button title="Bold" onClick={() => document.execCommand("bold")}>
+                <b>B</b>
+              </button>
+              <button
+                title="Italic"
+                onClick={() => document.execCommand("italic")}
+              >
+                <i>I</i>
+              </button>
+              <button onClick={() => update("textAlign", "left")}>≡</button>
+              <button onClick={() => update("textAlign", "center")}>≣</button>
+              <button onClick={() => update("textAlign", "right")}>≡</button>
+              <label title="Text colour">
+                <input
+                  type="color"
+                  value={cur.textColor || "#17202c"}
+                  onChange={(e) => update("textColor", e.target.value)}
+                />
+              </label>
+            </div>
+            <div className="toolGroup insertTools">
+              <label title="Slide colour">
+                Slide{" "}
+                <input
+                  type="color"
+                  value={cur.background || "#f7f2e9"}
+                  onChange={(e) => update("background", e.target.value)}
+                />
+              </label>
+              <button onClick={() => shape("rectangle")}>□</button>
+              <button onClick={() => shape("circle")}>○</button>
+              <button onClick={() => shape("line")}>—</button>
+              <label className="toolbarUpload">
+                ▧ Image
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  onChange={(e) => upload(e.target.files?.[0])}
+                />
+              </label>
+            </div>
+            <strong className="motionBadge">
+              <i>✦</i> {cur.motion || `Smart motion · ${cur.layout}`}
+            </strong>
+          </div>
+          <div className="canvas">
+            <div>
+              <SlideView
+                key={cur.id}
+                s={cur}
+                editable={!aiLocked || cur.visualLesson?.mode === "diagram"}
+                update={update}
+                moveShape={moveShape}
+              />
+            </div>
+          </div>
+          <div className="notes">
+            <header>
+              <b>Speaker notes</b>
+              <button className="collapseNotes" onClick={() => setNotesCollapsed(true)}>Collapse</button>
+              <button
+                onClick={() => {
+                  update(
+                    "notes",
+                    cur.notes ||
+                      "Spend 3 minutes here. Explain with a familiar visual analogy, then ask learners to predict the next step.",
+                  );
+                  flash("Speaker notes generated");
+                }}
+              >
+                ✦ Generate notes
+              </button>
+            </header>
+            <textarea
+              value={cur.notes}
+              onChange={(e) => update("notes", e.target.value)}
+            />
+          </div>
+          <footer>
+            <span>
+              Slide {sel + 1} of {slides.length}
+            </span>
+            <span>
+              Select text to apply bold or italic · drag shapes on canvas
+            </span>
+          </footer>
+        </section>
+        <aside className="copilot">
+          {aiLocked ? (
+            <div className="aiDirector">
+              <i>✦</i>
+              <small>AI AUTOPILOT</small>
+              <h2>The AI is running this show.</h2>
+              <p>
+                Content, composition, colour, image placement and motion were
+                validated from the AI JSON and are locked for faithful
+                rendering.
+              </p>
+              <dl>
+                <dt>Layout</dt>
+                <dd>{cur.layout}</dd>
+                <dt>Motion</dt>
+                <dd>{cur.motion || "none"}</dd>
+                <dt>Visual</dt>
+                <dd>{cur.imageData ? "AI image URL" : "Prompt-directed"}</dd>
+              </dl>
+              <button onClick={present}>▷ Present AI show</button>
+              <button onClick={blueprint}>Review blueprint</button>
+            </div>
+          ) : (
+            <>
+              <header>
+                {["Copilot", "Teaching", "Design"].map((x) => (
+                  <button
+                    className={tab === x ? "on" : ""}
+                    onClick={() => setTab(x)}
+                    key={x}
+                  >
+                    {x === "Copilot" ? "✦ " : ""}
+                    {x}
+                  </button>
+                ))}
+              </header>
+              {tab === "Copilot" ? (
+                <AI cur={cur} update={update} flash={flash} />
+              ) : tab === "Teaching" ? (
+                <Teach cur={cur} update={update} flash={flash} />
+              ) : (
+                <Design
+                  cur={cur}
+                  update={update}
+                  upload={upload}
+                  replaceImage={replaceImage}
+                  flash={flash}
+                />
+              )}
+            </>
+          )}
+        </aside>
+      </div>
+    </div>
+  );
+}
+function AIDirectionVisual({ description }: { description: string }) {
+  const d = description.toLowerCase();
+  if (d.includes("dom tree"))
+    return (
+      <div className="smartVisual domVisual">
+        <b>html</b>
+        <span>head</span>
+        <span>body</span>
+        <i>title</i>
+        <i>h1</i>
+        <i>p</i>
+      </div>
+    );
+  if (d.includes("anchor tag") || d.includes("opening tag"))
+    return (
+      <div className="smartVisual anatomyVisual">
+        <code>
+          &lt;a <mark>href</mark>=<em>"/work"</em>&gt;
+        </code>
+        <strong>Visit KMIT</strong>
+        <code>&lt;/a&gt;</code>
+        <span>attribute</span>
+        <span>content</span>
+      </div>
+    );
+  if (d.includes("wireframe") || d.includes("semantic"))
+    return (
+      <div className="smartVisual semanticVisual">
+        <b>HEADER</b>
+        <span>NAV</span>
+        <main>
+          MAIN <i>ARTICLE</i>
+        </main>
+        <aside>ASIDE</aside>
+        <footer>FOOTER</footer>
+      </div>
+    );
+  return (
+    <div className="smartVisual tagVisual">
+      <code>&lt;html&gt;</code>
+      <code>&nbsp;&nbsp;&lt;body&gt;</code>
+      <code>&nbsp;&nbsp;&nbsp;&nbsp;&lt;h1&gt;</code>
+      <code>&nbsp;&nbsp;&lt;/body&gt;</code>
+      <code>&lt;/html&gt;</code>
+    </div>
+  );
+}
+function splitCodeExample(source: string) {
+  const lines = source.split("\n"),
+    example = lines.findIndex((line) => /^\s*Example:\s*$/i.test(line)),
+    annotation = lines.findIndex((line) =>
+      /^\s*(?:•|Key attributes:)/i.test(line),
+    ),
+    start = example >= 0 ? example + 1 : 0,
+    end = annotation >= 0 ? annotation : lines.length,
+    code = lines.slice(start, end).join("\n").trim(),
+    annotations = (
+      annotation >= 0
+        ? lines.slice(annotation)
+        : example > 0
+          ? lines.slice(0, example)
+          : []
+    )
+      .map((line) => line.replace(/^\s*•\s*/, "").trim())
+      .filter(Boolean)
+      .slice(0, 4);
+  return { code: code || source, annotations };
+}
+function annotationMatchesLine(line: string, items: string[]) {
+  const value = line.toLowerCase(),
+    trim = value.trim();
+  return items.some((item) => {
+    const note = item.toLowerCase(),
+      tags = [...note.matchAll(/<([a-z][\w-]*)/g)].map((match) => match[1]);
+    if (
+      note.includes("<h1>") &&
+      note.includes("<h6>") &&
+      /<h[1-6][\s>]/.test(value)
+    )
+      return true;
+    if (tags.some((tag) => value.includes(`<${tag}`))) return true;
+    if (/tag name/.test(note) && /^<\/?[a-z]/.test(trim)) return true;
+    if (/attributes?/.test(note) && /\w+=/.test(value)) return true;
+    if (/content/.test(note) && trim && !trim.startsWith("<")) return true;
+    if (/closing tag/.test(note) && /^<\//.test(trim)) return true;
+    if (
+      /key attributes/.test(note) &&
+      /(type=|name=|required|minlength|pattern=|autocomplete=)/.test(value)
+    )
+      return true;
+    if (/void elements/.test(note) && /<(?:img|br|input)[\s>]/.test(value))
+      return true;
+    return false;
+  });
+}
+function CodeAnnotations({
+  items,
+}: {
+  items: string[];
+  source: string;
+  positions?: CalloutPosition[];
+  editable?: boolean;
+  selected?: number;
+  onMove?: (index: number, x: number, y: number) => void;
+  onSelect?: (index: number) => void;
+  onArrow?: (index: number, arrow: CalloutPosition["arrow"]) => void;
+}) {
+  if (!items.length) return null;
+  return (
+    <div
+      className="codeAnnotations anchoredAnnotations codeBulletList"
+      aria-label="Code notes"
+    >
+      {items.map((item, index) => (
+        <span key={index}>
+          <b>{item}</b>
+        </span>
+      ))}
+    </div>
+  );
+}
+function runnableDocument(source: string) {
+  const clean = source
+    .replace(/<script\b[\s\S]*?<\/script>/gi, "")
+    .replace(/\son\w+\s*=/gi, " data-blocked-event=");
+  const pick = (pattern: RegExp) => clean.match(pattern)?.[0] || "";
+  let markup =
+    pick(/<!doctype[\s\S]*?<\/html>/i) ||
+    pick(/<form\b[\s\S]*?<\/form>/i) ||
+    pick(/<img\b[\s\S]*?>(?:\s*<video\b[\s\S]*?<\/video>)?/i) ||
+    pick(/<h2>Reading list<\/h2>[\s\S]*?<\/ol>/i) ||
+    pick(/<a\b[\s\S]*?<\/a>/i);
+  if (!markup)
+    markup = /<[a-z][\s\S]*>/i.test(clean)
+      ? clean
+      : "<p>No renderable HTML was found.</p>";
+  return /<!doctype|<html[\s>]/i.test(markup)
+    ? markup
+    : `<!doctype html><html><head><meta charset="utf-8"></head><body>${markup}</body></html>`;
+}
+function CodeOutput({ source }: { source: string }) {
+  return (
+    <aside className="codeOutput">
+      <header>
+        <i />
+        <i />
+        <i />
+        <b>OUTPUT</b>
+      </header>
+      <iframe
+        title="Live rendered HTML output"
+        sandbox=""
+        srcDoc={runnableDocument(source)}
+      />
+    </aside>
+  );
+}
+function SvgDrawingUpload({
+  update,
+}: {
+  update?: (f: keyof Slide, v: any) => void;
+}) {
+  const load = async (file?: File) => {
+    if (!file) return;
+    if (file.size > 1_000_000) {
+      alert("SVG must be smaller than 1 MB.");
+      return;
+    }
+    const documentNode = new DOMParser().parseFromString(
+        await file.text(),
+        "image/svg+xml",
+      ),
+      root = documentNode.documentElement;
+    if (
+      root.tagName.toLowerCase() !== "svg" ||
+      documentNode.querySelector("parsererror")
+    ) {
+      alert("This is not a valid SVG file.");
+      return;
+    }
+    if (
+      documentNode.querySelector("script,foreignObject,image,use,style,link") ||
+      documentNode.querySelector("[onload],[onclick],[onerror]")
+    ) {
+      alert("This SVG contains unsupported or unsafe embedded content.");
+      return;
+    }
+    const number = (element: Element, name: string, fallback = 0) =>
+        Number.parseFloat(element.getAttribute(name) || String(fallback)),
+      toPath = (element: Element) => {
+        const tag = element.tagName.toLowerCase();
+        if (tag === "path") return element.getAttribute("d") || "";
+        if (tag === "line")
+          return `M ${number(element, "x1")} ${number(element, "y1")} L ${number(element, "x2")} ${number(element, "y2")}`;
+        if (tag === "polyline" || tag === "polygon") {
+          const points = (element.getAttribute("points") || "")
+            .trim()
+            .replace(/\s+/g, " L ");
+          return points ? `M ${points}${tag === "polygon" ? " Z" : ""}` : "";
+        }
+        if (tag === "rect") {
+          const x = number(element, "x"),
+            y = number(element, "y"),
+            w = number(element, "width"),
+            h = number(element, "height");
+          return `M ${x} ${y} H ${x + w} V ${y + h} H ${x} Z`;
+        }
+        if (tag === "circle") {
+          const cx = number(element, "cx"),
+            cy = number(element, "cy"),
+            r = number(element, "r");
+          return `M ${cx - r} ${cy} A ${r} ${r} 0 1 0 ${cx + r} ${cy} A ${r} ${r} 0 1 0 ${cx - r} ${cy}`;
+        }
+        if (tag === "ellipse") {
+          const cx = number(element, "cx"),
+            cy = number(element, "cy"),
+            rx = number(element, "rx"),
+            ry = number(element, "ry");
+          return `M ${cx - rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx + rx} ${cy} A ${rx} ${ry} 0 1 0 ${cx - rx} ${cy}`;
+        }
+        return "";
+      },
+      elements = [
+        ...documentNode.querySelectorAll(
+          "path,line,polyline,polygon,rect,circle,ellipse",
+        ),
+      ]
+        .filter((element) => !element.hasAttribute("transform"))
+        .slice(0, 120),
+      paths = elements
+        .map((element) => ({
+          d: toPath(element),
+          color:
+            (element.getAttribute("stroke") &&
+            element.getAttribute("stroke") !== "none"
+              ? element.getAttribute("stroke")
+              : element.getAttribute("fill")) || "#17202c",
+          width: Math.max(0.6, Math.min(8, number(element, "stroke-width", 2))),
+        }))
+        .filter(
+          (path) =>
+            path.d && !/url\(|javascript:|data:/i.test(path.d + path.color),
+        );
+    if (!paths.length) {
+      alert(
+        "No supported drawable paths were found. Convert SVG text and transformed groups to paths first.",
+      );
+      return;
+    }
+    let viewBox = root.getAttribute("viewBox");
+    if (!viewBox) {
+      const width = number(root, "width", 1000),
+        height = number(root, "height", 560);
+      viewBox = `0 0 ${width} ${height}`;
+    }
+    const values = viewBox.trim().split(/[ ,]+/).map(Number);
+    if (
+      values.length !== 4 ||
+      values.some((value) => !Number.isFinite(value)) ||
+      values[2] <= 0 ||
+      values[3] <= 0
+    ) {
+      alert("SVG viewBox is invalid.");
+      return;
+    }
+    [root, ...root.querySelectorAll("*")].forEach((element) =>
+      [...element.attributes].forEach((attribute) => {
+        const name = attribute.name.toLowerCase(),
+          value = attribute.value;
+        if (
+          name.startsWith("on") ||
+          name === "href" ||
+          name === "xlink:href" ||
+          /javascript:|data:text\/html|url\((?!#)/i.test(value)
+        )
+          element.removeAttribute(attribute.name);
+      }),
+    );
+    const serialized = new XMLSerializer().serializeToString(root),
+      previewData = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`;
+    const ratio = values[2] / values[3],
+      width = Math.min(82, ratio * 54),
+      height = Math.min(66, (width / ratio) * 1.78),
+      importedSvg: ImportedSvgDrawing = {
+        viewBox: values.join(" "),
+        paths,
+        previewData,
+        x: 50,
+        y: 59,
+        width,
+        height,
+      };
+    update?.("visualLesson", {
+      mode: "diagram",
+      eyebrow: "SVG DRAWING",
+      diagram: { nodes: [], connections: [], showHand: true, importedSvg },
+    });
+    update?.("layout", "sketch");
+    update?.("motion", "diagram-sequence");
+  };
+  return (
+    <label className="svgDrawingUpload">
+      ✎ Upload drawable SVG
+      <input
+        type="file"
+        accept="image/svg+xml,.svg"
+        onChange={(event) => {
+          void load(event.target.files?.[0]);
+          event.currentTarget.value = "";
+        }}
+      />
+    </label>
+  );
+}
+function DiagramTools({
+  lesson,
+  update,
+}: {
+  lesson: VisualLessonSpec;
+  update?: (f: keyof Slide, v: any) => void;
+}) {
+  if (lesson.mode !== "diagram") return null;
+  const selected = (lesson.diagram?.nodes || []).filter((node) => node.selected),
+    deselect = () => {
+      const diagram = lesson.diagram!;
+      update?.("visualLesson", {
+        ...lesson,
+        diagram: {
+          ...diagram,
+          selectedText: undefined,
+          nodes: diagram.nodes.map((node) => ({ ...node, selected: false })),
+        },
+      });
+    },
+    removeSelected = () => {
+      if (!selected.length) return;
+      const removed = new Set(selected.map((node) => node.id)),
+        diagram = lesson.diagram!;
+      update?.("visualLesson", {
+        ...lesson,
+        diagram: {
+          ...diagram,
+          nodes: diagram.nodes.filter((node) => !removed.has(node.id)),
+          connections: diagram.connections.filter(
+            (connection) =>
+              !removed.has(connection.from) && !removed.has(connection.to),
+          ),
+        },
+      });
+    };
+  const add = (type: "box" | "circle" | "arrow") => {
+    const diagram = lesson.diagram || { nodes: [], connections: [] },
+      order = Math.max(0, ...diagram.nodes.map((node) => node.order)) + 1,
+      offset = diagram.nodes.length % 4,
+      node = {
+        id: `outline-${Date.now()}`,
+        type,
+        x: 44 + offset * 9,
+        y: 62 + (offset % 2) * 12,
+        width: type === "arrow" ? 24 : type === "circle" ? 14 : 20,
+        height: type === "arrow" ? 10 : type === "circle" ? 22 : 18,
+        label: type === "arrow" ? "" : type === "circle" ? "Circle" : "Box",
+        accent: "#586B8C",
+        order,
+      } as const;
+    update?.("visualLesson", {
+      ...lesson,
+      diagram: { ...diagram, nodes: [...diagram.nodes, node] },
+    });
+  };
+  return (
+    <div className="diagramTools" aria-label="Add diagram component">
+      <span>Outline</span>
+      <button onClick={() => add("box")}>□ Box</button>
+      <button onClick={() => add("circle")}>○ Circle</button>
+      <button onClick={() => add("arrow")}>→ Arrow</button>
+      <button onClick={deselect}>Deselect</button>
+      <button
+        className="deleteDiagramComponent"
+        disabled={!selected.length}
+        onClick={removeSelected}
+      >
+        ⌫ Delete{selected.length > 1 ? ` (${selected.length})` : ""}
+      </button>
+    </div>
+  );
+}
+function SlideView({
+  s,
+  editable,
+  calloutEditable,
+  presenting,
+  update,
+  moveShape,
+}: {
+  s: Slide;
+  editable?: boolean;
+  calloutEditable?: boolean;
+  presenting?: boolean;
+  update?: (f: keyof Slide, v: any) => void;
+  moveShape?: (id: number, x: number, y: number) => void;
+}) {
+  editable = editable || !s.aiGenerated;
+  const ed = editable
+    ? { contentEditable: true, suppressContentEditableWarning: true }
+    : {};
+  const codeParts = s.layout === "code" ? splitCodeExample(s.body) : null,
+    code = codeParts?.code.split("\n") || null;
+  const snap = (value: number) => (Math.abs(value - 50) < 1.5 ? 50 : value);
+  const moveBlock = (
+    kind: "title" | "body" | "image",
+    cx: number,
+    cy: number,
+  ) => {
+    const el = document
+      .querySelector(".editor .slide")
+      ?.getBoundingClientRect();
+    if (!el) return;
+    update?.("__patch", {
+      [`${kind}X`]: snap(
+        Math.max(0, Math.min(95, ((cx - el.left) / el.width) * 100)),
+      ),
+      [`${kind}Y`]: snap(
+        Math.max(0, Math.min(95, ((cy - el.top) / el.height) * 100)),
+      ),
+    });
+  };
+  const moveCanvasImage = (id: number, cx: number, cy: number) => {
+    const el = document
+      .querySelector(".editor .slide")
+      ?.getBoundingClientRect();
+    if (!el) return;
+    update?.(
+      "images",
+      (s.images || []).map((x) =>
+        x.id === id
+          ? {
+              ...x,
+              x: snap(
+                Math.max(0, Math.min(100, ((cx - el.left) / el.width) * 100)),
+              ),
+              y: snap(
+                Math.max(0, Math.min(100, ((cy - el.top) / el.height) * 100)),
+              ),
+            }
+          : x,
+      ),
+    );
+  };
+  const calloutDefaults = () =>
+    (codeParts?.annotations || []).map((item, index) => {
+      const line = Math.max(
+        0,
+        (codeParts?.code || "")
+          .split("\n")
+          .findIndex((value) => annotationMatchesLine(value, [item])),
+      );
+      return (
+        s.codeCallouts?.[index] || {
+          x: 50.5,
+          y: 47 + line * 4.7 + index * 5.2,
+          arrow: "left" as const,
+        }
+      );
+    });
+  const moveCallout = (index: number, cx: number, cy: number) => {
+    const el = document
+      .querySelector(".editor .slide")
+      ?.getBoundingClientRect();
+    if (!el) return;
+    const next = calloutDefaults().map((item, i) =>
+      i === index
+        ? {
+            ...item,
+            x: snap(
+              Math.max(8, Math.min(92, ((cx - el.left) / el.width) * 100)),
+            ),
+            y: snap(
+              Math.max(8, Math.min(92, ((cy - el.top) / el.height) * 100)),
+            ),
+          }
+        : item,
+    );
+    update?.("__patch", { codeCallouts: next, selectedCallout: index });
+  };
+  const setCalloutArrow = (index: number, arrow: CalloutPosition["arrow"]) =>
+    update?.("__patch", {
+      codeCallouts: calloutDefaults().map((item, i) =>
+        i === index ? { ...item, arrow } : item,
+      ),
+      selectedCallout: index,
+    });
+  const resizeImage = (id: number | undefined, cx: number, cy: number) => {
+    const el = document
+      .querySelector(".editor .slide")
+      ?.getBoundingClientRect();
+    if (!el) return;
+    const x = ((cx - el.left) / el.width) * 100,
+      y = ((cy - el.top) / el.height) * 100;
+    if (id !== undefined) {
+      const image = (s.images || []).find((item) => item.id === id);
+      if (image)
+        update?.(
+          "images",
+          (s.images || []).map((item) =>
+            item.id === id
+              ? {
+                  ...item,
+                  w: Math.max(10, Math.min(100, Math.abs(x - image.x) * 2)),
+                  h: Math.max(10, Math.min(100, Math.abs(y - image.y) * 2)),
+                }
+              : item,
+          ),
+        );
+    } else
+      update?.("__patch", {
+        imageW: Math.max(10, Math.min(100, Math.abs(x - (s.imageX ?? 76)) * 2)),
+        imageH: Math.max(10, Math.min(100, Math.abs(y - (s.imageY ?? 50)) * 2)),
+      });
+  };
+  const codeHeight = code
+    ? Math.min(58, Math.max(38, 22 + code.length * 3.2))
+    : 38;
+  if (s.visualLesson)
+    return (
+      <article
+        className={`slide visualLessonSlide ${s.layout} motion-${(s.motion || s.layout).replaceAll(" ", "-")} theme-${s.theme || "studio"}`}
+        style={s.background ? { background: s.background } : undefined}
+      >
+        <b className="brand">
+          S2S<span>●</span>
+        </b>
+        <small>{s.tag}</small>
+        {(s.visualLesson.mode === "code" || s.visualLesson.mode === "split") && (
+          <h1>{s.title}</h1>
+        )}
+        <VisualLessonScene
+          lesson={s.visualLesson}
+          title={s.title}
+          body={s.body}
+          presenting={presenting}
+          editable={editable}
+          onImportedChange={(patch) =>
+            update?.("visualLesson", {
+              ...s.visualLesson,
+              diagram: {
+                ...s.visualLesson!.diagram,
+                importedSvg: {
+                  ...s.visualLesson!.diagram!.importedSvg!,
+                  ...patch,
+                },
+              },
+            })
+          }
+          onDiagramChange={(diagram) =>
+            update?.("visualLesson", { ...s.visualLesson, diagram })
+          }
+        />
+        <em>{String(s.id).padStart(2, "0")}</em>
+      </article>
+    );
+  return (
+    <article
+      className={`slide ${s.layout} motion-${(s.motion || s.layout).replaceAll(" ", "-")} theme-${s.theme || "studio"}`}
+      style={
+        {
+          ...(s.background ? { background: s.background } : {}),
+          ...(code
+            ? {
+                "--code-height": `${codeHeight}%`,
+                "--code-center": `${28 + codeHeight / 2}%`,
+                "--notes-top": `${30 + codeHeight}%`,
+              }
+            : {}),
+        } as React.CSSProperties
+      }
+    >
+      <b className="brand">
+        S2S<span>●</span>
+      </b>
+      <small>{s.tag}</small>
+      {(editable || !s.aiGenerated) && <SvgDrawingUpload update={update} />}
+      <h1
+        {...ed}
+        className={`${s.selectedBlock === "title" ? "selectedCanvasBlock" : ""} ai-${s.titleAnimation || "none"}`}
+        onClick={() => editable && update?.("selectedBlock", "title")}
+        onDoubleClick={(e: any) => e.currentTarget.focus()}
+        onPointerDown={(e) =>
+          editable && e.currentTarget.setPointerCapture(e.pointerId)
+        }
+        onPointerMove={(e) =>
+          editable &&
+          e.buttons === 1 &&
+          e.currentTarget.hasPointerCapture(e.pointerId) &&
+          moveBlock("title", e.clientX, e.clientY)
+        }
+        style={{
+          fontFamily: s.fontFamily,
+          fontSize: s.titleSize,
+          color: s.textColor,
+          textAlign: s.textAlign,
+          ...(s.titleX !== undefined
+            ? {
+                position: "absolute",
+                left: `${s.titleX}%`,
+                top: `${s.titleY ?? 28}%`,
+                width: `${s.titleW ?? 55}%`,
+                margin: 0,
+              }
+            : {}),
+        }}
+        onBlur={(e: any) => update?.("title", e.currentTarget.innerText)}
+      >
+        {s.title}
+      </h1>
+      {code ? (
+        <pre
+          className={`animatedCode ${s.selectedBlock === "body" ? "selectedCanvasBlock" : ""} ai-${s.bodyAnimation || "none"}`}
+          {...ed}
+          onClick={() => editable && update?.("selectedBlock", "body")}
+          onPointerDown={(e) =>
+            editable && e.currentTarget.setPointerCapture(e.pointerId)
+          }
+          onPointerMove={(e) =>
+            editable &&
+            e.buttons === 1 &&
+            e.currentTarget.hasPointerCapture(e.pointerId) &&
+            moveBlock("body", e.clientX, e.clientY)
+          }
+          style={{
+            fontFamily: s.fontFamily,
+            fontSize: s.bodySize,
+            color: s.textColor,
+            textAlign: s.bodyAlign || s.textAlign,
+            ...(s.bodyX !== undefined
+              ? {
+                  position: "absolute",
+                  left: `${s.bodyX}%`,
+                  top: `${s.bodyY ?? 55}%`,
+                  width: `${s.bodyW ?? 48}%`,
+                  margin: 0,
+                }
+              : {}),
+          }}
+          onBlur={(e: any) => update?.("body", e.currentTarget.innerText)}
+        >
+          {code.map((line, i) => (
+            <span
+              key={i}
+              className={
+                annotationMatchesLine(line, codeParts?.annotations || [])
+                  ? "annotatedCodeLine"
+                  : ""
+              }
+              style={{ "--line": i } as React.CSSProperties}
+            >
+              <i className="lineNumber" aria-hidden="true">
+                {i + 1}
+              </i>
+              {line || " "}
+            </span>
+          ))}
+        </pre>
+      ) : (
+        <p
+          {...ed}
+          className={`${s.selectedBlock === "body" ? "selectedCanvasBlock" : ""} ai-${s.bodyAnimation || "none"}`}
+          onClick={() => editable && update?.("selectedBlock", "body")}
+          onDoubleClick={(e: any) => e.currentTarget.focus()}
+          onPointerDown={(e) =>
+            editable && e.currentTarget.setPointerCapture(e.pointerId)
+          }
+          onPointerMove={(e) =>
+            editable &&
+            e.buttons === 1 &&
+            e.currentTarget.hasPointerCapture(e.pointerId) &&
+            moveBlock("body", e.clientX, e.clientY)
+          }
+          style={{
+            fontFamily: s.fontFamily,
+            fontSize: s.bodySize,
+            color: s.textColor,
+            textAlign: s.bodyAlign || s.textAlign,
+            ...(s.bodyX !== undefined
+              ? {
+                  position: "absolute",
+                  left: `${s.bodyX}%`,
+                  top: `${s.bodyY ?? 55}%`,
+                  width: `${s.bodyW ?? 48}%`,
+                  margin: 0,
+                }
+              : {}),
+          }}
+          onBlur={(e: any) => update?.("body", e.currentTarget.innerText)}
+        >
+          {s.body}
+        </p>
+      )}
+      {code && <CodeOutput source={codeParts?.code || s.body} />}{" "}
+      {codeParts && (
+        <CodeAnnotations
+          items={codeParts.annotations}
+          source={codeParts.code}
+          positions={s.codeCallouts}
+          editable={editable || calloutEditable || !!update}
+          selected={s.selectedCallout}
+          onSelect={(index) => update?.("selectedCallout", index)}
+          onMove={moveCallout}
+          onArrow={setCalloutArrow}
+        />
+      )}
+      {s.imageData && (
+        <img
+          onClick={() =>
+            editable &&
+            update?.("__patch", {
+              selectedBlock: "image",
+              selectedImageId: undefined,
+            })
+          }
+          onPointerDown={(e) =>
+            editable && e.currentTarget.setPointerCapture(e.pointerId)
+          }
+          onPointerMove={(e) =>
+            editable &&
+            e.buttons === 1 &&
+            e.currentTarget.hasPointerCapture(e.pointerId) &&
+            moveBlock("image", e.clientX, e.clientY)
+          }
+          className={`slideAsset ai-${(s.motion || "reveal").replaceAll(" ", "-")} ${s.selectedBlock === "image" && s.selectedImageId === undefined ? "selectedCanvasBlock" : ""}`}
+          src={s.imageData}
+          alt={s.imageDescription || "Slide visual"}
+          style={{
+            filter: `brightness(${s.imageBrightness || 100}%) contrast(${s.imageContrast || 100}%) saturate(${s.imageSaturation || 100}%)`,
+            opacity: (s.imageOpacity ?? 100) / 100,
+            objectFit: s.imageFit || "cover",
+            ...(s.imageX !== undefined
+              ? {
+                  left: `${s.imageX}%`,
+                  top: `${s.imageY ?? 22}%`,
+                  width: `${s.imageW ?? 36}%`,
+                  height: `${s.imageH ?? 53}%`,
+                  right: "auto",
+                }
+              : {}),
+          }}
+        />
+      )}
+      {!s.imageData && s.aiGenerated && s.imageDescription && (
+        <div
+          className={`aiVisualPlaceholder ai-${(s.motion || "reveal").replaceAll(" ", "-")}`}
+          style={{
+            left: `${s.imageX ?? 76}%`,
+            top: `${s.imageY ?? 50}%`,
+            width: `${s.imageW ?? 38}%`,
+            height: `${s.imageH ?? 62}%`,
+            opacity: (s.imageOpacity ?? 100) / 100,
+          }}
+        >
+          <AIDirectionVisual description={s.imageDescription} />
+          <b>STRUCTURAL FIGURE</b>
+          <span>{s.imageDescription}</span>
+        </div>
+      )}
+      {(s.images || []).map((image) => (
+        <img
+          key={image.id}
+          onClick={() =>
+            editable &&
+            update?.("__patch", {
+              selectedBlock: "image",
+              selectedImageId: image.id,
+            })
+          }
+          className={`slideAsset extraSlideImage ${s.selectedImageId === image.id ? "selectedCanvasBlock" : ""}`}
+          src={image.src}
+          alt="Added slide visual"
+          onPointerDown={(e) =>
+            editable && e.currentTarget.setPointerCapture(e.pointerId)
+          }
+          onPointerMove={(e) =>
+            editable &&
+            e.buttons === 1 &&
+            e.currentTarget.hasPointerCapture(e.pointerId) &&
+            moveCanvasImage(image.id, e.clientX, e.clientY)
+          }
+          style={{
+            left: `${image.x}%`,
+            top: `${image.y}%`,
+            width: `${image.w}%`,
+            height: `${image.h}%`,
+            right: "auto",
+            opacity: (image.opacity ?? 100) / 100,
+            objectFit: image.fit || "cover",
+            borderRadius: image.radius ?? 8,
+          }}
+        />
+      ))}
+      {editable &&
+        s.selectedBlock === "image" &&
+        (() => {
+          const image = (s.images || []).find(
+              (item) => item.id === s.selectedImageId,
+            ),
+            x = image?.x ?? s.imageX ?? 76,
+            y = image?.y ?? s.imageY ?? 50,
+            w = image?.w ?? s.imageW ?? 36,
+            h = image?.h ?? s.imageH ?? 53,
+            handles = ["nw", "ne", "sw", "se"];
+          return (
+            <span
+              className="canvasSelection"
+              style={{
+                left: `${x}%`,
+                top: `${y}%`,
+                width: `${w}%`,
+                height: `${h}%`,
+              }}
+            >
+              {handles.map((handle) => (
+                <i
+                  key={handle}
+                  className={`resizeHandle ${handle}`}
+                  onPointerDown={(e) =>
+                    e.currentTarget.setPointerCapture(e.pointerId)
+                  }
+                  onPointerMove={(e) =>
+                    e.buttons === 1 &&
+                    e.currentTarget.hasPointerCapture(e.pointerId) &&
+                    resizeImage(image?.id, e.clientX, e.clientY)
+                  }
+                />
+              ))}
+              <b className="selectionLabel">
+                Image · {Math.round(w)} × {Math.round(h)}
+              </b>
+            </span>
+          );
+        })()}
+      {(s.shapes || []).map((shape) => (
+        <i
+          key={shape.id}
+          onPointerDown={(e) =>
+            editable && e.currentTarget.setPointerCapture(e.pointerId)
+          }
+          onPointerMove={(e) =>
+            editable &&
+            e.buttons === 1 &&
+            e.currentTarget.hasPointerCapture(e.pointerId) &&
+            moveShape?.(shape.id, e.clientX, e.clientY)
+          }
+          className={`userShape ${shape.type}`}
+          style={
+            {
+              left: `${shape.x}%`,
+              top: `${shape.y}%`,
+              "--shape-color": shape.color,
+            } as React.CSSProperties
+          }
+        >
+          {shape.glyph}
+        </i>
+      ))}
+      {s.layout === "number" && (
+        <strong className="stat">
+          <i>150</i>
+          <span>K</span>
+          <small>input values</small>
+        </strong>
+      )}
+      {s.layout === "matrix" && (
+        <div className="matrix">
+          {[3, 18, 52, 81, 94, 70, 21, 8, 9, 44, 91, 99, 77, 32, 12, 4].map(
+            (n, i) => (
+              <i
+                key={i}
+                style={
+                  {
+                    "--cell": i,
+                    "--strength": 0.2 + n / 125,
+                  } as React.CSSProperties
+                }
+              >
+                {n}
+              </i>
+            ),
+          )}
+          <b className="scanWindow">3×3 filter</b>
+        </div>
+      )}
+      {s.layout === "process" && (
+        <div className="kernel">
+          <div className="imageGrid">
+            {Array.from({ length: 16 }, (_, i) => (
+              <i key={i} />
+            ))}
+            <b className="movingWindow" />
+          </div>
+          <span>→</span>
+          <b className="featureResult">
+            FEATURE<small>edge found</small>
+          </b>
+        </div>
+      )}
+      {s.layout === "architecture" && (
+        <div className="arch">
+          {["IMAGE", "CONV", "RELU", "POOL", "CLASS"].map((x, i) => (
+            <span key={x} style={{ "--step": i } as React.CSSProperties}>
+              {x}
+              {i < 4 && <b>→</b>}
+            </span>
+          ))}
+        </div>
+      )}
+      {s.layout === "cycle" && (
+        <div className="learningCycle">
+          {["Predict", "Measure", "Correct", "Repeat"].map((x, i) => (
+            <span key={x} style={{ "--step": i } as React.CSSProperties}>
+              {x}
+            </span>
+          ))}
+          <i>↻</i>
+        </div>
+      )}
+      {s.layout === "summary" && (
+        <div className="summaryWords">
+          <span>LOCAL</span>
+          <span>HIERARCHICAL</span>
+          <span>LEARNED</span>
+        </div>
+      )}
+      <em>{String(s.id).padStart(2, "0")}</em>
+    </article>
+  );
+}
+function AI({ cur, update, flash }: any) {
+  const [question, setQuestion] = useState("");
+  const simple = () => {
+      update("body", cur.body.split(/[.—]/)[0] + ".");
+      flash("Slide simplified");
+    },
+    technical = () => {
+      update(
+        "body",
+        cur.body +
+          " This mechanism should be evaluated through its inputs, transformation steps, constraints and measurable output.",
+      );
+      flash("Technical depth added");
+    },
+    example = () => {
+      update(
+        "body",
+        cur.body +
+          " For example, connect this idea to a concrete scenario the audience already understands.",
+      );
+      flash("Example added");
+    },
+    quiz = () => {
+      update(
+        "notes",
+        cur.notes +
+          "\n\nAudience check: Explain the core idea in one sentence, then identify one practical use case.",
+      );
+      flash("Quiz added to speaker notes");
+    };
+  return (
+    <div className="ai">
+      <div className="context">
+        <i>✦</i>
+        <span>
+          <b>Working on slide {cur.id}</b>
+          <small>{cur.title.replace("\n", " ")}</small>
+        </span>
+      </div>
+      <label>QUICK ACTIONS</label>
+      <div className="quick">
+        <button onClick={simple}>Aa Simplify</button>
+        <button onClick={technical}>⌘ More technical</button>
+        <button onClick={example}>＋ Add example</button>
+        <button
+          onClick={() => {
+            update("layout", "architecture");
+            update("motion", "diagram sequence");
+            flash("Diagram layout applied");
+          }}
+        >
+          ◇ Add diagram
+        </button>
+        <button onClick={simple}>≡ Reduce text</button>
+        <button onClick={quiz}>? Create quiz</button>
+      </div>
+      <div className="suggest">
+        <small>✦ LIVE SUGGESTION</small>
+        <b>
+          {cur.body.length > 150
+            ? "Reduce cognitive load"
+            : "Strengthen the visual explanation"}
+        </b>
+        <p>
+          {cur.body.length > 150
+            ? "Split or simplify the message so the audience can absorb it quickly."
+            : "Use a progressive diagram to reveal relationships in sequence."}
+        </p>
+        <button
+          onClick={
+            cur.body.length > 150
+              ? simple
+              : () => {
+                  update("layout", "process");
+                  update("motion", "progressive build");
+                  flash("Suggestion applied");
+                }
+          }
+        >
+          Apply
+        </button>
+      </div>
+      <div className="ask">
+        <input
+          value={question}
+          onChange={(e) => setQuestion(e.target.value)}
+          placeholder="Ask about this slide…"
+        />
+        <button
+          onClick={() => {
+            if (!question) return;
+            update(
+              "notes",
+              cur.notes +
+                `\n\nCopilot response to “${question}”: Lead with a familiar analogy, then reveal the technical language.`,
+            );
+            setQuestion("");
+            flash("Copilot answer added to notes");
+          }}
+        >
+          ↑
+        </button>
+      </div>
+    </div>
+  );
+}
+function Teach({ cur, update, flash }: any) {
+  return (
+    <div className="teach">
+      <label>TEACHING LENS</label>
+      <h3>Learning objective</h3>
+      <textarea
+        value={`By the end, learners can explain: ${cur.title.replace("\n", " ")}`}
+        onChange={(e) =>
+          update("notes", `Learning objective: ${e.target.value}\n${cur.notes}`)
+        }
+      />
+      <div>
+        <button
+          onClick={() => {
+            update("body", `In simple terms: ${cur.body.split(/[.—]/)[0]}.`);
+            flash("Beginner level applied");
+          }}
+        >
+          <small>Difficulty</small>
+          <b>Beginner</b>
+        </button>
+        <button
+          onClick={() => {
+            update(
+              "body",
+              cur.body +
+                " Consider the underlying assumptions, trade-offs and boundary conditions.",
+            );
+            flash("Advanced depth applied");
+          }}
+        >
+          <small>Difficulty</small>
+          <b>Advanced</b>
+        </button>
+      </div>
+      <h3>Teacher notes</h3>
+      <textarea
+        value={cur.notes}
+        onChange={(e) => update("notes", e.target.value)}
+      />
+      <h3>Teaching actions</h3>
+      <div className="teachingActions">
+        <button
+          onClick={() => {
+            update(
+              "notes",
+              cur.notes +
+                "\n\nDiscussion: What would change if the main assumption were removed?",
+            );
+            flash("Discussion question added");
+          }}
+        >
+          ＋ Discussion
+        </button>
+        <button
+          onClick={() => {
+            update(
+              "notes",
+              cur.notes +
+                "\n\nActivity: In pairs, create one example and one counterexample in three minutes.",
+            );
+            flash("Mini activity added");
+          }}
+        >
+          ＋ Activity
+        </button>
+        <button
+          onClick={() => {
+            update(
+              "notes",
+              cur.notes +
+                "\n\nCheck: Ask one learner to explain the idea without using the slide's terminology.",
+            );
+            flash("Understanding check added");
+          }}
+        >
+          ＋ Check
+        </button>
+      </div>
+    </div>
+  );
+}
+function Design({ cur, update, upload, replaceImage, flash }: any) {
+  const themes = [
+      ["Modern", "classroom", "#fff8ef", "#20242b"],
+      ["Technical", "developer", "#182132", "#f4f7fb"],
+      ["Academic", "research", "#f3eee4", "#2a2f36"],
+      ["Executive", "executive", "#f7f5fb", "#272034"],
+      ["Editorial", "editorial", "#ead0ad", "#2a211b"],
+      ["Minimal", "studio", "#ffffff", "#17202c"],
+    ],
+    selectedImage = (cur.images || []).find(
+      (image: CanvasImage) => image.id === cur.selectedImageId,
+    ),
+    imageUpdate = (key: keyof CanvasImage, value: number | string) =>
+      selectedImage &&
+      update(
+        "images",
+        (cur.images || []).map((image: CanvasImage) =>
+          image.id === selectedImage.id ? { ...image, [key]: value } : image,
+        ),
+      ),
+    removeImage = () =>
+      selectedImage
+        ? update("__patch", {
+            images: (cur.images || []).filter(
+              (image: CanvasImage) => image.id !== selectedImage.id,
+            ),
+            selectedImageId: undefined,
+          })
+        : update("imageData", undefined),
+    imageLayout = (x: number, y: number, w: number, h: number) =>
+      selectedImage
+        ? update(
+            "images",
+            (cur.images || []).map((image: CanvasImage) =>
+              image.id === selectedImage.id ? { ...image, x, y, w, h } : image,
+            ),
+          )
+        : update("__patch", {
+            imageX: x,
+            imageY: y,
+            imageW: w,
+            imageH: h,
+            imageOpacity: 100,
+          }),
+    duplicateImage = () =>
+      selectedImage &&
+      update("__patch", {
+        images: [
+          ...(cur.images || []),
+          {
+            ...selectedImage,
+            id: Date.now(),
+            x: Math.min(94, selectedImage.x + 4),
+            y: Math.min(94, selectedImage.y + 4),
+          },
+        ],
+        selectedImageId: undefined,
+      }),
+    moveLayer = (direction: number) => {
+      if (!selectedImage) return;
+      const images = [...(cur.images || [])],
+        index = images.findIndex(
+          (image: CanvasImage) => image.id === selectedImage.id,
+        ),
+        next = Math.max(0, Math.min(images.length - 1, index + direction));
+      images.splice(index, 1);
+      images.splice(next, 0, selectedImage);
+      update("images", images);
+    },
+    target = cur.selectedBlock === "body" ? "body" : "title",
+    coord = (label: string, key: string, value: number, min = 0, max = 100) => (
+      <label className="coordField">
+        <span>{label}</span>
+        <input
+          type="range"
+          min={min}
+          max={max}
+          value={value}
+          onChange={(e) => update(key, +e.target.value)}
+        />
+        <input
+          type="number"
+          min={min}
+          max={max}
+          value={Math.round(value)}
+          onChange={(e) => update(key, +e.target.value)}
+        />
+      </label>
+    ),
+    addShape = (type: Shape["type"], glyph?: string) =>
+      update("shapes", [
+        ...(cur.shapes || []),
+        { id: Date.now(), type, x: 68, y: 62, color: "#e85d3f", glyph },
+      ]),
+    autoArrange = () => {
+      const images = (cur.images || []).map(
+        (image: CanvasImage, index: number) => ({
+          ...image,
+          x: index ? 72 : 76,
+          y: index ? 76 : 50,
+          w: index ? 22 : 38,
+          h: index ? 26 : 62,
+        }),
+      );
+      update("__patch", {
+        titleX: 30,
+        titleY: 35,
+        titleW: cur.imageData || images.length ? 48 : 70,
+        bodyX: 29,
+        bodyY: 62,
+        bodyW: cur.imageData || images.length ? 44 : 64,
+        textAlign: "left",
+        images,
+        ...(cur.imageData
+          ? {
+              imageX: 76,
+              imageY: 50,
+              imageW: 38,
+              imageH: 62,
+              imageOpacity: 100,
+            }
+          : {}),
+      });
+      flash("Content-aware layout applied");
+    };
+  return (
+    <div className="design inspectorPanel">
+      <p className="inspectorHint">
+        Select an element on the canvas, then use these precise controls.
+        Double-click text to edit it.
+      </p>
+      <details open>
+        <summary>
+          <span>
+            <i>◇</i>
+            <b>Slide design</b>
+          </span>
+          <em>Theme, canvas & elements</em>
+        </summary>
+        <section>
+          <div className="themeGrid">
+            {themes.map((x) => (
+              <button
+                className={cur.theme === x[1] ? "on" : ""}
+                key={x[0]}
+                onClick={() => {
+                  update("__patch", {
+                    theme: x[1],
+                    background: x[2],
+                    textColor: x[3],
+                  });
+                  flash(x[0] + " theme applied");
+                }}
+              >
+                <i style={{ background: x[2], borderColor: x[3] }} />
+                <b>{x[0]}</b>
+              </button>
+            ))}
+          </div>
+          <div className="designControls">
+            <label>
+              Background
+              <input
+                type="color"
+                value={cur.background || "#f7f2e9"}
+                onChange={(e) => update("background", e.target.value)}
+              />
+            </label>
+            <label>
+              Text
+              <input
+                type="color"
+                value={cur.textColor || "#17202c"}
+                onChange={(e) => update("textColor", e.target.value)}
+              />
+            </label>
+          </div>
+          <div className="professionalActions">
+            <button onClick={autoArrange}>✦ Auto arrange</button>
+            <select
+              value={cur.motion || "subtle reveal"}
+              onChange={(e) => update("motion", e.target.value)}
+            >
+              <option>subtle reveal</option>
+              <option>progressive build</option>
+              <option>emphasis</option>
+              <option>diagram sequence</option>
+              <option>none</option>
+            </select>
+          </div>
+          <div className="insertElementGrid">
+            <button onClick={() => addShape("rectangle")}>□ Rectangle</button>
+            <button onClick={() => addShape("circle")}>○ Circle</button>
+            <button onClick={() => addShape("line")}>— Line</button>
+            <label>
+              ▧ Image
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => upload(e.target.files?.[0])}
+              />
+            </label>
+            <button onClick={() => addShape("symbol", "★")}>★ Star</button>
+            <button onClick={() => addShape("symbol", "→")}>→ Arrow</button>
+            <button onClick={() => addShape("symbol", "✓")}>✓ Check</button>
+            <button onClick={() => addShape("symbol", "✦")}>✦ Spark</button>
+          </div>
+        </section>
+      </details>
+      <details
+        open={cur.selectedBlock === "title" || cur.selectedBlock === "body"}
+      >
+        <summary>
+          <span>
+            <i>Aa</i>
+            <b>Content editor</b>
+          </span>
+          <em>Font, size & position</em>
+        </summary>
+        <section>
+          <div className="blockSelector">
+            <button
+              className={target === "title" ? "on" : ""}
+              onClick={() => update("selectedBlock", "title")}
+            >
+              Title
+            </button>
+            <button
+              className={target === "body" ? "on" : ""}
+              onClick={() => update("selectedBlock", "body")}
+            >
+              Body
+            </button>
+          </div>
+          <label className="inspectorSelect">
+            Font
+            <select
+              value={cur.fontFamily || "Georgia"}
+              onChange={(e) => update("fontFamily", e.target.value)}
+            >
+              <option>Georgia</option>
+              <option>Arial</option>
+              <option>Helvetica</option>
+              <option>Trebuchet MS</option>
+              <option>Courier New</option>
+            </select>
+          </label>
+          <div className="fontRow">
+            <label>
+              Size
+              <input
+                type="number"
+                min="10"
+                max="120"
+                value={
+                  target === "title" ? cur.titleSize || 43 : cur.bodySize || 14
+                }
+                onChange={(e) =>
+                  update(
+                    target === "title" ? "titleSize" : "bodySize",
+                    +e.target.value,
+                  )
+                }
+              />
+            </label>
+            <button onClick={() => document.execCommand("bold")}>
+              <b>B</b>
+            </button>
+            <button onClick={() => document.execCommand("italic")}>
+              <i>I</i>
+            </button>
+            <input
+              title="Text colour"
+              type="color"
+              value={cur.textColor || "#17202c"}
+              onChange={(e) => update("textColor", e.target.value)}
+            />
+          </div>
+          <div className="alignRow">
+            <button
+              className={cur.textAlign === "left" ? "on" : ""}
+              onClick={() => update("textAlign", "left")}
+            >
+              Left
+            </button>
+            <button
+              className={cur.textAlign === "center" ? "on" : ""}
+              onClick={() => update("textAlign", "center")}
+            >
+              Centre
+            </button>
+            <button
+              className={cur.textAlign === "right" ? "on" : ""}
+              onClick={() => update("textAlign", "right")}
+            >
+              Right
+            </button>
+          </div>
+          <h4>Position & size (%)</h4>
+          {coord(
+            "X",
+            target === "title" ? "titleX" : "bodyX",
+            target === "title" ? (cur.titleX ?? 30) : (cur.bodyX ?? 29),
+          )}
+          {coord(
+            "Y",
+            target === "title" ? "titleY" : "bodyY",
+            target === "title" ? (cur.titleY ?? 35) : (cur.bodyY ?? 62),
+          )}
+          {coord(
+            "Width",
+            target === "title" ? "titleW" : "bodyW",
+            target === "title" ? (cur.titleW ?? 48) : (cur.bodyW ?? 44),
+            15,
+            90,
+          )}
+        </section>
+      </details>
+      <details open={cur.selectedBlock === "image"}>
+        <summary>
+          <span>
+            <i>▧</i>
+            <b>Image editor</b>
+          </span>
+          <em>Crop, effects & position</em>
+        </summary>
+        <section>
+          {cur.imageData || selectedImage ? (
+            <div className="imageEditor">
+              <img
+                src={selectedImage?.src || cur.imageData}
+                alt="Selected slide visual"
+              />
+              <label>
+                Brightness{" "}
+                <input
+                  type="range"
+                  min="20"
+                  max="180"
+                  value={cur.imageBrightness || 100}
+                  onChange={(e) => update("imageBrightness", +e.target.value)}
+                />
+                <b>{cur.imageBrightness || 100}%</b>
+              </label>
+              <label>
+                Contrast{" "}
+                <input
+                  type="range"
+                  min="20"
+                  max="180"
+                  value={cur.imageContrast || 100}
+                  onChange={(e) => update("imageContrast", +e.target.value)}
+                />
+                <b>{cur.imageContrast || 100}%</b>
+              </label>
+              <label>
+                Saturation{" "}
+                <input
+                  type="range"
+                  min="0"
+                  max="200"
+                  value={cur.imageSaturation || 100}
+                  onChange={(e) => update("imageSaturation", +e.target.value)}
+                />
+                <b>{cur.imageSaturation || 100}%</b>
+              </label>
+              <label>
+                Opacity{" "}
+                <input
+                  type="range"
+                  min="10"
+                  max="100"
+                  value={selectedImage?.opacity ?? cur.imageOpacity ?? 100}
+                  onChange={(e) =>
+                    selectedImage
+                      ? imageUpdate("opacity", +e.target.value)
+                      : update("imageOpacity", +e.target.value)
+                  }
+                />
+                <b>{selectedImage?.opacity ?? cur.imageOpacity ?? 100}%</b>
+              </label>
+              {selectedImage && (
+                <label>
+                  Corner radius{" "}
+                  <input
+                    type="range"
+                    min="0"
+                    max="48"
+                    value={selectedImage.radius ?? 8}
+                    onChange={(e) => imageUpdate("radius", +e.target.value)}
+                  />
+                  <b>{selectedImage.radius ?? 8}px</b>
+                </label>
+              )}
+              <h4>Position & size (%)</h4>
+              <div className="imageLayouts">
+                <button onClick={() => imageLayout(76, 50, 38, 62)}>
+                  Right
+                </button>
+                <button onClick={() => imageLayout(24, 50, 38, 62)}>
+                  Left
+                </button>
+                <button onClick={() => imageLayout(50, 50, 100, 100)}>
+                  Background
+                </button>
+              </div>
+              {selectedImage ? (
+                <>
+                  <label className="coordField">
+                    <span>X</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={selectedImage.x}
+                      onChange={(e) => imageUpdate("x", +e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      value={Math.round(selectedImage.x)}
+                      onChange={(e) => imageUpdate("x", +e.target.value)}
+                    />
+                  </label>
+                  <label className="coordField">
+                    <span>Y</span>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={selectedImage.y}
+                      onChange={(e) => imageUpdate("y", +e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      value={Math.round(selectedImage.y)}
+                      onChange={(e) => imageUpdate("y", +e.target.value)}
+                    />
+                  </label>
+                  <label className="coordField">
+                    <span>Width</span>
+                    <input
+                      type="range"
+                      min="10"
+                      max="100"
+                      value={selectedImage.w}
+                      onChange={(e) => imageUpdate("w", +e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      value={Math.round(selectedImage.w)}
+                      onChange={(e) => imageUpdate("w", +e.target.value)}
+                    />
+                  </label>
+                  <label className="coordField">
+                    <span>Height</span>
+                    <input
+                      type="range"
+                      min="10"
+                      max="100"
+                      value={selectedImage.h}
+                      onChange={(e) => imageUpdate("h", +e.target.value)}
+                    />
+                    <input
+                      type="number"
+                      value={Math.round(selectedImage.h)}
+                      onChange={(e) => imageUpdate("h", +e.target.value)}
+                    />
+                  </label>
+                </>
+              ) : (
+                <>
+                  {coord("X", "imageX", cur.imageX ?? 76)}
+                  {coord("Y", "imageY", cur.imageY ?? 50)}
+                  {coord("Width", "imageW", cur.imageW ?? 38, 10, 100)}
+                  {coord("Height", "imageH", cur.imageH ?? 62, 10, 100)}
+                </>
+              )}
+              <div>
+                <button
+                  onClick={() =>
+                    selectedImage
+                      ? imageUpdate(
+                          "fit",
+                          selectedImage.fit === "contain" ? "cover" : "contain",
+                        )
+                      : update(
+                          "imageFit",
+                          cur.imageFit === "contain" ? "cover" : "contain",
+                        )
+                  }
+                >
+                  {(selectedImage?.fit || cur.imageFit) === "contain"
+                    ? "Fill frame"
+                    : "Fit image"}
+                </button>
+                <label className="replaceImage">
+                  Replace
+                  <input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => replaceImage(e.target.files?.[0])}
+                  />
+                </label>
+                <button className="removeImage" onClick={removeImage}>
+                  Remove
+                </button>
+              </div>
+              {selectedImage && (
+                <div className="objectActions">
+                  <button onClick={duplicateImage}>Duplicate</button>
+                  <button onClick={() => moveLayer(-1)}>Send backward</button>
+                  <button onClick={() => moveLayer(1)}>Bring forward</button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <label className="emptyImageEditor">
+              ▧<b>Add an image to this slide</b>
+              <small>Upload PNG, JPEG or WebP</small>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={(e) => upload(e.target.files?.[0])}
+              />
+            </label>
+          )}
+        </section>
+      </details>
+    </div>
+  );
+}

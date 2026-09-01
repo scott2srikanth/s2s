@@ -1,0 +1,164 @@
+{
+  "schema_version": "s2s-visual-lesson-1",
+  "title": "The JavaScript Event Loop — Visually Explained",
+  "audience": "Developers learning asynchronous JavaScript",
+  "slides": [
+    {
+      "id": 1,
+      "title": "JavaScript coordinates more than one queue",
+      "tag": "01 · THE RUNTIME",
+      "body": "Synchronous work runs on the call stack. Browser APIs finish external work. Ready callbacks wait until JavaScript can safely run them.",
+      "layout": "sketch",
+      "notes": "Let the marker draw the runtime from left to right before explaining the loop.",
+      "theme": "developer",
+      "background": "#FBFCFE",
+      "textColor": "#17202C",
+      "motion": "diagram-sequence",
+      "aiGenerated": true,
+      "visualLesson": {
+        "mode": "diagram",
+        "eyebrow": "RUNTIME MAP",
+        "diagram": {
+          "showHand": true,
+          "nodes": [
+            {"id":"source","type":"box","x":12,"y":55,"width":17,"height":20,"label":"Your code","accent":"#6B7FD7","order":1},
+            {"id":"stack","type":"box","x":37,"y":55,"width":18,"height":28,"label":"Call stack","accent":"#E85D3F","order":3},
+            {"id":"apis","type":"box","x":62,"y":32,"width":19,"height":20,"label":"Web APIs","accent":"#2F9E73","order":5},
+            {"id":"queue","type":"box","x":62,"y":76,"width":22,"height":20,"label":"Callback queue","accent":"#8B5CF6","order":7},
+            {"id":"loop","type":"circle","x":88,"y":55,"width":17,"height":27,"label":"Event loop","accent":"#D18B32","order":9}
+          ],
+          "connections": [
+            {"from":"source","to":"stack","label":"runs","order":2},
+            {"from":"stack","to":"apis","label":"delegates","order":4},
+            {"from":"apis","to":"queue","label":"callback ready","order":6},
+            {"from":"queue","to":"loop","label":"next task","order":8},
+            {"from":"loop","to":"stack","label":"only when empty","order":10}
+          ]
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Predict the execution order",
+      "tag": "02 · CODE TRACE",
+      "body": "The timer callback is queued, but synchronous statements finish first.",
+      "layout": "code-demo",
+      "notes": "Ask for a prediction, then let the code type and reveal the output.",
+      "theme": "developer",
+      "background": "#F7F9FC",
+      "textColor": "#17202C",
+      "motion": "progressive-build",
+      "aiGenerated": true,
+      "visualLesson": {
+        "mode": "code",
+        "eyebrow": "LIVE JAVASCRIPT",
+        "code": {
+          "language": "JavaScript",
+          "filename": "event-loop.js",
+          "typingSpeed": 22,
+          "source": "console.log('A: start');\n\nsetTimeout(() => {\n  console.log('C: timer');\n}, 0);\n\nconsole.log('B: end');",
+          "output": "A: start  →  B: end  →  C: timer",
+          "bullets": [
+            "The script begins as one synchronous task",
+            "setTimeout registers work outside the call stack",
+            "The callback runs only after the stack becomes empty"
+          ]
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Microtasks run before the next task",
+      "tag": "03 · QUEUE PRIORITY",
+      "body": "Promise callbacks enter the microtask queue. JavaScript drains that queue before taking the next timer or interaction task.",
+      "layout": "sketch",
+      "notes": "Emphasize the priority gate: stack empty, drain microtasks, then take one task.",
+      "theme": "developer",
+      "background": "#FBFCFE",
+      "textColor": "#17202C",
+      "motion": "diagram-sequence",
+      "aiGenerated": true,
+      "visualLesson": {
+        "mode": "diagram",
+        "eyebrow": "PRIORITY MODEL",
+        "diagram": {
+          "showHand": true,
+          "nodes": [
+            {"id":"stack","type":"box","x":15,"y":52,"width":18,"height":24,"label":"Stack empty?","accent":"#E85D3F","order":1},
+            {"id":"micro","type":"box","x":42,"y":30,"width":22,"height":20,"label":"Microtasks","accent":"#8B5CF6","order":3},
+            {"id":"render","type":"circle","x":68,"y":52,"width":17,"height":27,"label":"Render","accent":"#2F9E73","order":5},
+            {"id":"task","type":"box","x":42,"y":76,"width":22,"height":20,"label":"Next task","accent":"#6B7FD7","order":7},
+            {"id":"repeat","type":"circle","x":90,"y":52,"width":14,"height":23,"label":"Repeat","accent":"#D18B32","order":9}
+          ],
+          "connections": [
+            {"from":"stack","to":"micro","label":"yes","order":2},
+            {"from":"micro","to":"render","label":"drain all","order":4},
+            {"from":"render","to":"task","label":"take one","order":6},
+            {"from":"task","to":"repeat","label":"execute","order":8}
+          ]
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Promises beat timers",
+      "tag": "04 · CODE TRACE",
+      "body": "A resolved Promise schedules a microtask, so it runs before a zero-delay timer.",
+      "layout": "code-demo",
+      "notes": "Use the output to distinguish microtasks from timer tasks.",
+      "theme": "developer",
+      "background": "#F7F9FC",
+      "textColor": "#17202C",
+      "motion": "progressive-build",
+      "aiGenerated": true,
+      "visualLesson": {
+        "mode": "code",
+        "eyebrow": "QUEUE PRIORITY",
+        "code": {
+          "language": "JavaScript",
+          "filename": "priority.js",
+          "typingSpeed": 20,
+          "source": "console.log('1: script');\n\nsetTimeout(() => console.log('4: timer'), 0);\n\nPromise.resolve().then(() => {\n  console.log('3: microtask');\n});\n\nconsole.log('2: script end');",
+          "output": "1: script  →  2: script end  →  3: microtask  →  4: timer",
+          "bullets": [
+            "Synchronous code completes first",
+            "The Promise callback drains as a microtask",
+            "The timer becomes the next task"
+          ]
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "One loop, one reliable mental model",
+      "tag": "05 · RECAP",
+      "body": "Run the stack. Drain every microtask. Render when needed. Take one task. Repeat.",
+      "layout": "sketch",
+      "notes": "Finish by drawing the loop once without interruption.",
+      "theme": "developer",
+      "background": "#FBFCFE",
+      "textColor": "#17202C",
+      "motion": "diagram-sequence",
+      "aiGenerated": true,
+      "visualLesson": {
+        "mode": "diagram",
+        "eyebrow": "THE COMPLETE LOOP",
+        "diagram": {
+          "showHand": true,
+          "nodes": [
+            {"id":"task","type":"circle","x":14,"y":56,"width":16,"height":26,"label":"Task","accent":"#6B7FD7","order":1},
+            {"id":"stack","type":"box","x":36,"y":56,"width":18,"height":24,"label":"Run stack","accent":"#E85D3F","order":3},
+            {"id":"micro","type":"box","x":60,"y":56,"width":20,"height":24,"label":"Microtasks","accent":"#8B5CF6","order":5},
+            {"id":"paint","type":"circle","x":83,"y":56,"width":17,"height":27,"label":"Paint","accent":"#2F9E73","order":7}
+          ],
+          "connections": [
+            {"from":"task","to":"stack","order":2},
+            {"from":"stack","to":"micro","order":4},
+            {"from":"micro","to":"paint","order":6},
+            {"from":"paint","to":"task","label":"next turn","order":8}
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,346 @@
+.diagramLesson::before {
+  content: "";
+  position: absolute;
+  inset: -7% -2% 2%;
+  border: 2px solid #202532;
+  border-radius: 15px;
+  background:
+    radial-gradient(circle at 15% 10%, #f1e9ff 0, transparent 28%),
+    radial-gradient(circle at 90% 85%, #dff7f2 0, transparent 30%), #fff;
+  box-shadow: 0 12px 30px #5b477818;
+}
+.visualLessonSlide:has(.diagramLesson) {
+  background: #fff !important;
+}
+.visualLessonSlide:has(.diagramLesson) > .brand,
+.visualLessonSlide:has(.diagramLesson) > small,
+.visualLessonSlide:has(.diagramLesson) > em {
+  opacity: 0.35;
+}
+.visualLessonSlide:has(.diagramLesson) .visualLesson {
+  inset: 4.5% 4% 5%;
+}
+.diagramLesson .lessonHeader {
+  z-index: 3;
+  left: 2%;
+  right: 2%;
+  top: -4%;
+}
+.diagramLesson .lessonHeader small {
+  color: #7b4fc9 !important;
+}
+.diagramLesson .lessonSketch {
+  position: relative;
+  z-index: 2;
+}
+.writtenHeading,
+.writtenPoint {
+  font-family: Inter, Arial, sans-serif;
+  fill: #17202c;
+}
+.writtenHeading {
+  font-size: 40px;
+  font-weight: 760;
+  letter-spacing: -1px;
+}
+.writtenPoint {
+  font-size: 18px;
+  font-weight: 560;
+}
+.writtenBullet {
+  fill: #7b4fc9;
+  font-size: 25px;
+}
+.diagramLesson.isPresenting .textRevealMask {
+  transform-box: fill-box;
+  transform-origin: left center;
+  transform: scaleX(0);
+  animation: revealTextBehindMarker var(--reveal-duration) linear
+    var(--reveal-delay) forwards;
+}
+@keyframes revealTextBehindMarker {
+  from {
+    transform: scaleX(0);
+  }
+  to {
+    transform: scaleX(1);
+  }
+}
+.diagramLesson .sketchNode text,
+.diagramLesson .connectorLabel {
+  font-family: Inter, Arial, sans-serif;
+  font-weight: 680;
+}
+.diagramLesson .sketchNode text {
+  font-size: 20px;
+}
+.diagramLesson .connectorLabel {
+  fill: #6f4bb4;
+  font-size: 15px;
+}
+.diagramLesson.isPresenting .sketchStroke,
+.diagramLesson.isPresenting .sketchArrow {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation-duration: 1.15s;
+  animation-timing-function: linear;
+  animation-delay: calc(4.08s + var(--draw-order) * 1.05s);
+}
+.diagramLesson.isPresenting .sketchNode text,
+.diagramLesson.isPresenting .connectorLabel {
+  fill: transparent;
+  stroke: #17202c;
+  stroke-width: 0.65;
+  stroke-dasharray: 420;
+  stroke-dashoffset: 420;
+  opacity: 1;
+  animation: lessonHandWrite 0.48s ease forwards;
+  animation-delay: calc(4.08s + var(--draw-order) * 1.05s + 0.92s);
+}
+@keyframes lessonHandWrite {
+  0% {
+    opacity: 1;
+    fill: transparent;
+    stroke-dashoffset: 1100;
+  }
+  70% {
+    opacity: 1;
+    fill: transparent;
+    stroke-dashoffset: 0;
+  }
+  100% {
+    opacity: 1;
+    fill: #17202c;
+    stroke-dashoffset: 0;
+    stroke: transparent;
+  }
+}
+.diagramLesson .drawingHand {
+  z-index: 8;
+  left: 5%;
+  top: 35%;
+  width: 150px;
+  height: 225px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  pointer-events: none;
+  transform: translate(-17%, -18%) rotate(-8deg);
+  filter: drop-shadow(0 10px 10px #20253222);
+}
+.diagramLesson .drawingHand img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.syncedDrawingHand {
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(0 8px 9px #20253228);
+}
+.diagramLesson.isPresenting .drawingHand {
+  animation: realHandDraw 10.5s linear 0.15s forwards;
+}
+@keyframes realHandDraw {
+  0% {
+    left: 5%;
+    top: 3%;
+    opacity: 0;
+  }
+  2% {
+    opacity: 1;
+  }
+  8% {
+    left: 26%;
+    top: 3%;
+  }
+  15% {
+    left: 52%;
+    top: 3%;
+  }
+  20% {
+    left: 74%;
+    top: 3%;
+  }
+  23% {
+    left: 7%;
+    top: 12%;
+  }
+  31% {
+    left: 43%;
+    top: 12%;
+  }
+  36% {
+    left: 78%;
+    top: 12%;
+  }
+  39% {
+    left: 8%;
+    top: 19%;
+  }
+  45% {
+    left: 52%;
+    top: 19%;
+  }
+  49% {
+    left: 13%;
+    top: 47%;
+  }
+  57% {
+    left: 27%;
+    top: 47%;
+  }
+  62% {
+    left: 38%;
+    top: 47%;
+  }
+  70% {
+    left: 50%;
+    top: 47%;
+  }
+  76% {
+    left: 63%;
+    top: 47%;
+  }
+  84% {
+    left: 75%;
+    top: 47%;
+  }
+  92% {
+    left: 88%;
+    top: 47%;
+    opacity: 1;
+  }
+  100% {
+    left: 92%;
+    top: 52%;
+    opacity: 0;
+  }
+}
+.present .diagramLesson .drawingHand {
+  width: clamp(210px, 16vw, 330px);
+  height: clamp(310px, 24vw, 490px);
+}
+.aiBlueprintPreview .diagramLesson .drawingHand {
+  display: none;
+}
+.aiBlueprintPreview .visualLessonSlide:has(.diagramLesson) .visualLesson {
+  inset: 4%;
+}
+.aiBlueprintPreview .writtenHeading {
+  font-size: 42px;
+}
+.importedSvgPreview {
+  pointer-events: none;
+}
+.importedSvgPreview.presenting {
+  opacity: 0;
+  animation: importedSvgPreviewReveal 0.35s ease var(--svg-finish) forwards;
+}
+.importedSvgDrawing {
+  overflow: visible;
+}
+.importedSvgDrawing.editable {
+  cursor: grab;
+}
+.importedSvgDrawing.editable:active {
+  cursor: grabbing;
+}
+.importedSvgDrawing.previewOnly path {
+  opacity: 0;
+}
+.diagramLesson.isPresenting .importedSvgStroke {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: importedSvgDraw var(--svg-duration) linear var(--svg-delay)
+    forwards;
+}
+@keyframes importedSvgDraw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes importedSvgPreviewReveal {
+  to {
+    opacity: 1;
+  }
+}
+.importedSvgSelection rect {
+  fill: transparent;
+  stroke: #4f7cff;
+  stroke-width: 2.5;
+  stroke-dasharray: 8 6;
+  pointer-events: none;
+}
+.importedSvgSelection circle {
+  fill: #fff;
+  stroke: #4f7cff;
+  stroke-width: 3;
+  cursor: nwse-resize;
+}
+.editableNode {
+  cursor: grab;
+}
+.editableNode:active {
+  cursor: grabbing;
+}
+.nodeHitArea {
+  fill: transparent;
+  stroke: none;
+  pointer-events: all;
+}
+.editableTextGroup { cursor: grab; }
+.editableTextGroup:active { cursor: grabbing; }
+.textHitArea { fill: transparent; stroke: none; pointer-events: all; }
+.textSelection { fill: transparent; stroke: #4f7cff; stroke-width: 2.5; stroke-dasharray: 8 6; pointer-events: none; }
+.nodeSelection {
+  fill: transparent;
+  stroke: #4f7cff;
+  stroke-width: 2.5;
+  stroke-dasharray: 8 6;
+  pointer-events: none;
+}
+.nodeResizeHandle {
+  fill: #fff;
+  stroke: #4f7cff;
+  stroke-width: 3;
+  cursor: nwse-resize;
+}
+.svgDrawingUpload {
+  position: absolute;
+  z-index: 25;
+  top: 14px;
+  right: 46px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 10px;
+  border: 1px solid #d6dde7;
+  border-radius: 7px;
+  background: #fff;
+  color: #344054;
+  box-shadow: 0 5px 14px #10182812;
+  cursor: pointer;
+  font:
+    700 8px/1 Arial,
+    sans-serif;
+}
+.svgDrawingUpload:hover {
+  border-color: #7b4fc9;
+  color: #6f42c1;
+}
+.svgDrawingUpload input {
+  display: none;
+}
+.present .svgDrawingUpload,
+.aiBlueprintPreview .svgDrawingUpload {
+  display: none;
+}
+.editor.aiLocked .slides > button:last-child {
+  display: block !important;
+}
+.aiBlueprint > section > .add {
+  display: block !important;
+}
