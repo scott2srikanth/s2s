@@ -3495,7 +3495,12 @@ function Editor({
               <SlideView
                 key={cur.id}
                 s={cur}
-                editable={!aiLocked || cur.visualLesson?.mode === "diagram"}
+                editable={
+                  !aiLocked ||
+                  cur.visualLesson?.mode === "diagram" ||
+                  cur.visualLesson?.mode === "code" ||
+                  cur.visualLesson?.mode === "split"
+                }
                 assetEditable={cur.layout === "content-image"}
                 update={update}
                 moveShape={moveShape}
@@ -4183,6 +4188,9 @@ export function SlideView({
           }
           onDiagramChange={(diagram) =>
             update?.("visualLesson", { ...s.visualLesson, diagram })
+          }
+          onCodeChange={(code) =>
+            update?.("visualLesson", { ...s.visualLesson, code })
           }
         />
         {s.imageData && (

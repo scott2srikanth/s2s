@@ -243,6 +243,7 @@ export default function VisualLessonScene({
   editable = false,
   onImportedChange,
   onDiagramChange,
+  onCodeChange,
 }: {
   lesson: VisualLessonSpec;
   title?: string;
@@ -251,6 +252,7 @@ export default function VisualLessonScene({
   editable?: boolean;
   onImportedChange?: (patch: Partial<ImportedSvgDrawing>) => void;
   onDiagramChange?: (diagram: NonNullable<VisualLessonSpec["diagram"]>) => void;
+  onCodeChange?: (code: NonNullable<VisualLessonSpec["code"]>) => void;
 }) {
   const files =
       lesson.code?.files?.length
@@ -272,6 +274,12 @@ export default function VisualLessonScene({
     [visible, setVisible] = useState(
       presenting && lesson.mode === "code" ? 0 : source.length,
     );
+  const updateFiles = (nextFiles: { filename: string; source: string }[]) =>
+    onCodeChange?.({ ...lesson.code!, files: nextFiles, filename: undefined, source: undefined });
+  const updateActiveFile = (patch: Partial<{ filename: string; source: string }>) => {
+    const index = Math.min(activeFile, files.length - 1);
+    updateFiles(files.map((file, fileIndex) => fileIndex === index ? { ...file, ...patch } : file));
+  };
   useEffect(() => {
     if (lesson.mode !== "code" || !presenting) {
       setVisible(source.length);
@@ -934,14 +942,26 @@ export default function VisualLessonScene({
     structuredOutput = parseStructuredRunOutput(outputText),
     activeFilename = files[Math.min(activeFile, files.length - 1)]?.filename || "",
     normalizedActiveFilename = normalizedCodeFilename(activeFilename),
-    canRunPreview =
+    isHtmlFile = /\.html?$/i.test(normalizedActiveFilename),
+    canRunPreview = isHtmlFile || (
       /(^|\/)app\.jsx$/i.test(normalizedActiveFilename) &&
-      /react|jsx/i.test(lesson.code?.language || "");
+      /react|jsx/i.test(lesson.code?.language || "")
+    ),
+    htmlPreview = isHtmlFile
+      ? (() => {
+          let document = source;
+          const css = files.filter((file) => /\.css$/i.test(normalizedCodeFilename(file.filename))).map((file) => file.source).join("\n");
+          const js = files.filter((file) => /\.js$/i.test(normalizedCodeFilename(file.filename))).map((file) => file.source).join("\n");
+          if (css) document = document.replace(/<\/head>/i, `<style>${css}</style></head>`);
+          if (js) document = document.replace(/<\/body>/i, `<script>${js.replace(/<\/script/gi, "<\\/script")}</script></body>`);
+          return document;
+        })()
+      : "";
   return (
     <div
       className={`visualLesson codeLesson ${previewOpen ? "previewOpen" : "previewClosed"} ${presenting ? "isPresenting" : "isStatic"}`}
     >
-      <section className="lessonCodeWindow">
+      <section className={`lessonCodeWindow ${editable && !presenting ? "codeEditing" : ""}`}>
         <header>
           <i />
           <i />
@@ -965,6 +985,17 @@ export default function VisualLessonScene({
                 {normalizedCodeFilename(file.filename)}
               </button>
             ))}
+            {editable && !presenting && (
+              <button
+                className="addCodeFile"
+                title="Add code file"
+                onClick={() => {
+                  const next = [...files, { filename: `file-${files.length + 1}.html`, source: "<!-- Add your code here -->" }];
+                  updateFiles(next);
+                  setActiveFile(next.length - 1);
+                }}
+              >+ File</button>
+            )}
           </nav>
           <em>{lesson.code?.language}</em>
           {canRunPreview && (
@@ -981,7 +1012,30 @@ export default function VisualLessonScene({
             </button>
           )}
         </header>
-        <pre>
+        {editable && !presenting && (
+          <div className="codeFileEditBar">
+            <label>File name <input value={activeFilename} onChange={(event) => updateActiveFile({ filename: event.target.value })} /></label>
+            <button
+              disabled={files.length === 1}
+              onClick={() => {
+                if (files.length === 1) return;
+                const next = files.filter((_, index) => index !== activeFile);
+                updateFiles(next);
+                setActiveFile(Math.max(0, activeFile - 1));
+              }}
+            >Delete file</button>
+          </div>
+        )}
+        {editable && !presenting ? (
+          <textarea
+            className="codeSourceEditor"
+            aria-label={`Edit ${activeFilename}`}
+            placeholder="Type or paste code for this file…"
+            spellCheck={false}
+            value={source}
+            onChange={(event) => updateActiveFile({ source: event.target.value })}
+          />
+        ) : <pre>
           {lines.map((line, index) => (
             <span key={index}>
               <i>{index + 1}</i>
@@ -991,7 +1045,7 @@ export default function VisualLessonScene({
               )}
             </span>
           ))}
-        </pre>
+        </pre>}
         <footer>
           <span>UTF-8</span>
           <span>Spaces: 2</span>
@@ -1001,10 +1055,17 @@ export default function VisualLessonScene({
       {previewOpen && canRunPreview && (
       <section className={`lessonOutput ${done ? "ready" : "waiting"}`}>
         <header>
-          <span>React preview</span>
+          <span>{isHtmlFile ? "HTML preview" : "React preview"}</span>
           <b>● LIVE</b>
         </header>
-        {structuredOutput.enabled ? (
+        {isHtmlFile ? (
+          <iframe
+            className="htmlRunFrame"
+            title={`${activeFilename} output`}
+            sandbox="allow-scripts"
+            srcDoc={htmlPreview}
+          />
+        ) : structuredOutput.enabled ? (
           <div className="browserEmulator">
             {structuredOutput.hasBrowser && (
               <>
