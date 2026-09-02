@@ -871,6 +871,12 @@ button {
   line-height: 1.5;
   outline: none;
 }
+.slideBodyLine {
+  display: block;
+}
+.slideBodyLine.bulletLine + .slideBodyLine.bulletLine {
+  margin-top: 0.38em;
+}
 .slide > em {
   position: absolute;
   right: 28px;
@@ -5864,6 +5870,7 @@ a.logo {
 .diagramEditBar{position:absolute;z-index:40;right:5%;top:4%;display:flex;align-items:center;gap:7px}.diagramEditBar .svgDrawingUpload{position:static!important;inset:auto!important;translate:none!important}.diagramTools{display:flex;align-items:center;gap:4px;padding:4px;border:1px solid #dce3eb;border-radius:9px;background:#fffffff2;box-shadow:0 7px 22px #10182815;backdrop-filter:blur(8px)}.diagramTools>span{padding:0 5px;color:#7b8491;font:750 7px/1 var(--sans);letter-spacing:.08em;text-transform:uppercase}.diagramTools button{min-height:27px;padding:6px 8px;border:0;border-radius:6px;background:transparent;color:#344054;font:700 8px/1 var(--sans);cursor:pointer}.diagramTools button:hover{background:#eef3ff;color:#3158a5}.aiBlueprintPreview .diagramEditBar,.present .diagramEditBar{display:none}
 .panelControls{display:flex;align-items:center;gap:4px;padding-right:8px;border-right:1px solid #e1e6ec}.panelControls button{white-space:nowrap}.diagramToolbarTop{display:flex;align-items:center;gap:6px}.diagramToolbarTop .diagramTools{padding:2px;box-shadow:none;background:#fff}.diagramToolbarTop .svgDrawingUpload{position:static!important;inset:auto!important;translate:none!important;min-height:31px;margin:0;padding:7px 9px}.diagramTools .deleteDiagramComponent{color:#b42318}.diagramTools .deleteDiagramComponent:disabled{opacity:.35;cursor:not-allowed}.editor.leftCollapsed .workspace{grid-template-columns:0 minmax(0,1fr) 330px}.editor.rightCollapsed .workspace{grid-template-columns:190px minmax(0,1fr) 0}.editor.leftCollapsed.rightCollapsed .workspace{grid-template-columns:0 minmax(0,1fr) 0}.editor.leftCollapsed .slides,.editor.rightCollapsed .copilot{visibility:hidden;overflow:hidden;border:0}.editor.leftCollapsed .stage,.editor.rightCollapsed .stage{min-width:0}.editor.leftCollapsed .canvas>div,.editor.rightCollapsed .canvas>div{max-width:min(1120px,96%)}
 .selectionTools{white-space:nowrap}.selectionTools .deleteSelection{color:#b42318}.selectionTools button:disabled{opacity:.38;cursor:not-allowed}
+.selectionTools .contextTitleSize{display:flex!important;align-items:center;gap:5px;padding:4px 7px;color:#344054;font-weight:700}.contextTitleSize input{width:42px;border:0;background:transparent;color:inherit;font:700 9px Arial;outline:0}
 .editor.notesCollapsed .stage{grid-template-rows:42px minmax(0,1fr) 32px}.editor.notesCollapsed .notes{display:none}.editor.notesCollapsed .canvas>div,.editor.leftCollapsed .canvas>div,.editor.rightCollapsed .canvas>div{width:min(1240px,96%);max-width:none;height:auto;aspect-ratio:16/9}.editor.leftCollapsed.rightCollapsed.notesCollapsed .canvas>div{width:min(1420px,97%)}.notes .collapseNotes{margin-left:auto!important;margin-right:8px!important;color:#667085!important}.editor.aiLocked.notesCollapsed .stage{grid-template-rows:42px minmax(0,1fr) 32px}
 @media (max-width: 1100px) {
   .editor > header nav {
@@ -6236,6 +6243,10 @@ a.logo {
 }
 .editorTools .toolGroup {
   display: none !important;
+}
+.editorTools .selectionTools {
+  display: flex !important;
+  flex: 0 0 auto;
 }
 .editorTools .motionBadge {
   position: static;
@@ -6627,6 +6638,9 @@ a.logo {
 .editor.aiLocked .editorTools > .toolGroup,
 .editor.aiLocked .editorTools > .motionBadge {
   display: none !important;
+}
+.editor.aiLocked .editorTools > .selectionTools {
+  display: flex !important;
 }
 .editor.aiLocked .slide [contenteditable] {
   pointer-events: none;
@@ -9045,7 +9059,10 @@ a.logo {
   font:
     600 34px/1.05 Georgia,
     serif;
+  translate: -50% -50%;
+  outline: none;
 }
+.editor .editableLessonTitle[contenteditable="true"]{cursor:move;touch-action:none}.editor .editableLessonTitle[contenteditable="true"]:focus{cursor:text}
 .visualLessonSlide > p {
   position: absolute;
   left: 6%;
@@ -9209,12 +9226,12 @@ a.logo {
   gap: 12px 18px;
 }
 .codeLesson.previewOpen {
-  grid-template-columns: minmax(0, 1.75fr) minmax(210px, 0.55fr);
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.75fr);
 }
 .codeLesson .lessonHeader {
   grid-column: 1/-1;
 }
-.visualLessonSlide.code-demo > small{display:none}.visualLessonSlide.code-demo>h1{top:7%!important}.visualLessonSlide.code-demo>.codeLesson{inset:18% 5.5% 7%;padding-top:0}.lessonOutput header{justify-content:space-between!important;padding-inline:14px}.lessonOutput header span{color:#344054}.lessonOutput>div strong{margin:0}
+.visualLessonSlide.code-demo > small{display:none}.visualLessonSlide.code-demo>.codeLesson{inset:18% 5.5% 7%;padding-top:0}.lessonOutput header{justify-content:space-between!important;padding-inline:14px}.lessonOutput header span{color:#344054}.lessonOutput>div strong{margin:0}
 .lessonCodeWindow,
 .lessonOutput {
   min-width: 0;
@@ -9329,7 +9346,14 @@ a.logo {
 }
 .lessonOutput {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   grid-template-rows: 31px 1fr;
+}
+.lessonOutput > header,
+.lessonOutput > .browserEmulator {
+  grid-column: 1 / -1;
+  width: 100%;
+  max-width: none;
 }
 .lessonOutput header {
   justify-content: flex-end;
@@ -9345,20 +9369,259 @@ a.logo {
 .lessonOutput > div {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+  align-items: stretch;
+  justify-content: flex-start;
+  overflow: auto;
   padding: 16px;
-  text-align: center;
+  text-align: left;
+  scrollbar-gutter: stable;
 }
 .lessonOutput small {
   color: #98a2b3;
   font: 650 7px Arial;
 }
 .lessonOutput strong {
-  margin: 12px 0;
+  display: block;
+  max-width: 100%;
+  margin: 0;
   font: 750 18px Arial;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
-.lessonOutput button {
+.lessonOutput strong.simpleOutput {
+  margin: auto;
+  text-align: center;
+}
+.lessonOutput strong.detailedOutput {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+.lessonOutput > .browserEmulator {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  justify-self: stretch;
+  align-self: stretch;
+  padding: 0;
+  overflow: hidden;
+  background: #fff;
+  text-align: left;
+}
+.browserEmulator > .browserEmulatorBar,
+.browserEmulator > .browserViewport,
+.browserEmulator > .consoleToggle,
+.browserEmulator > .consoleDrawer {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+  justify-self: stretch;
+}
+.browserEmulatorBar {
+  flex: 0 0 25px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 9px;
+  border-bottom: 1px solid #e1e6ec;
+  background: #f6f8fa;
+  width: 100%;
+  box-sizing: border-box;
+}
+.browserEmulatorBar i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #c8d0da;
+}
+.browserEmulatorBar i:first-child { background: #ef6a60; }
+.browserEmulatorBar span {
+  margin-left: 3px;
+  color: #667085;
+  font: 700 6px Arial;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+.browserEmulatorBar span small {
+  margin-left: 7px;
+  color: #98a2b3;
+  font: 600 5.5px Arial;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.browserViewport {
+  display: grid;
+  flex: 1 1 auto;
+  min-height: 0;
+  place-items: center;
+  padding: 14px;
+  overflow: auto;
+  background:
+    linear-gradient(#fff,#fff) padding-box,
+    linear-gradient(135deg,#eef4ff,#f7f9fc) border-box;
+}
+.browserRenderedContent {
+  max-width: 100%;
+  color: #17202c;
+  font: 750 15px/1.4 Arial;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  text-align: center;
+}
+.routerPreview {
+  width: min(100%, 520px);
+  overflow: hidden;
+  border: 1px solid #d4dce6;
+  border-radius: 9px;
+  background: #fff;
+  box-shadow: 0 10px 26px #10182814;
+  text-align: left;
+}
+.routerPreview > header {
+  display: block!important;
+  height: auto!important;
+  padding: 12px 14px!important;
+  border-bottom: 1px solid #dfe5ec;
+  background: #f7f9fb;
+}
+.routerPreview > header > b {
+  display: block;
+  margin-bottom: 9px;
+  color: #17202c;
+  font: 800 11px Arial;
+  text-align: center;
+}
+.routerPreview nav {
+  display: grid;
+  grid-template-columns: repeat(auto-fit,minmax(70px,1fr));
+  gap: 5px;
+}
+.routerPreview nav button {
+  min-width: 0;
+  padding: 6px 5px;
+  border: 1px solid #d3dae4;
+  border-radius: 5px;
+  background: #fff;
+  color: #475467;
+  font: 700 7px Arial;
+  cursor: pointer;
+}
+.routerPreview nav button.active {
+  border-color: #316ed5;
+  background: #eaf2ff;
+  color: #174ea6;
+}
+.routerPreview > section {
+  min-height: 125px;
+  padding: 13px 15px 16px;
+}
+.routerPreview h3 {
+  margin: 0 0 7px;
+  color: #17202c;
+  font: 800 11px Arial;
+}
+.routerPreview p {
+  margin: 0;
+  color: #667085;
+  font: 600 7px/1.5 Arial;
+  white-space: normal;
+}
+.routerPreview dl { margin: 4px 0 0; }
+.routerPreview dl div { display:grid;grid-template-columns:75px 1fr;padding:4px 0;border-bottom:1px solid #edf0f4; }
+.routerPreview dt { color:#667085;font:700 7px Arial; }
+.routerPreview dd { margin:0;color:#17202c;font:700 7px Arial; }
+.routeMetric { display:grid;place-items:center;gap:5px;padding:15px; }
+.routeMetric strong { color:#2457a7;font:850 24px Arial!important; }
+.routeMetric span { color:#667085;font:650 7px Arial; }
+.routerPreview table { width:100%;border-collapse:collapse;color:#344054;font:650 6.5px Arial; }
+.routerPreview th,.routerPreview td { padding:5px 6px;border:1px solid #dfe5ec;text-align:left; }
+.routerPreview th { background:#f3f6f9;color:#475467;font-weight:800; }
+.browserMockAction {
+  display: flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 10px;
+}
+.browserMockAction span {
+  max-width: 100%;
+  padding: 11px 16px;
+  border: 1px solid #98a2b3;
+  border-radius: 7px;
+  background: #fff;
+  color: #17202c;
+  font: 750 11px Arial;
+  box-shadow: 0 4px 12px #1018281a;
+}
+.browserMockAction em {
+  color: #667085;
+  font: 650 8px/1.25 Arial;
+  font-style: normal;
+  white-space: nowrap;
+}
+.consoleToggle {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 10px;
+  border: 0;
+  border-top: 1px solid #cdd5df;
+  border-radius: 0;
+  background: #eef2f6;
+  color: #253044;
+  font: 700 7px Arial;
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+.consoleToggle b { color: #667085; font-size: 6px; }
+.consoleDrawer {
+  position: relative;
+  width: 100%;
+  max-height: min(62%,340px);
+  min-height: 78px;
+  box-sizing: border-box;
+  overflow: auto;
+  padding: 13px 12px 9px;
+  border-top: 1px solid #cbd4df;
+  background: #fbfcfe;
+  color: #263244;
+  box-shadow: inset 0 1px #fff;
+  flex: 0 0 auto;
+}
+.consoleResizeHandle {
+  position: absolute;
+  z-index: 2;
+  top: 2px;
+  left: 50%;
+  width: 44px;
+  height: 5px;
+  border-radius: 5px;
+  background: #aeb9c7;
+  translate: -50% 0;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.consoleDrawer code {
+  display: block;
+  padding: 3px 0;
+  color: inherit;
+  font: 600 7px/1.35 "SFMono-Regular",Consolas,monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.consoleDrawer code i {
+  margin-right: 7px;
+  color: #55d187;
+  font-style: normal;
+}
+.lessonOutput > div:not(.browserEmulator) > button {
   border: 0;
   border-radius: 6px;
   background: #17202c;
@@ -9400,8 +9663,23 @@ a.logo {
   font-size: clamp(14px, 1vw, 21px);
 }
 .present .lessonOutput strong {
-  font-size: clamp(28px, 2.2vw, 46px);
+  font-size: clamp(20px, 1.4vw, 30px);
 }
+.present .lessonOutput strong.detailedOutput {
+  font-size: clamp(13px, 0.82vw, 18px);
+  line-height: 1.45;
+}
+.present .browserMockAction span {
+  padding: clamp(12px,1vw,20px) clamp(18px,1.4vw,28px);
+  font-size: clamp(14px,1vw,20px);
+}
+.present .browserMockAction em { font-size: clamp(11px,.7vw,15px); }
+.present .browserRenderedContent { font-size: clamp(17px,1.2vw,25px); }
+.present .routerPreview { width:min(100%,760px); }
+.present .routerPreview > header > b,.present .routerPreview h3 { font-size:clamp(13px,.9vw,19px); }
+.present .routerPreview nav button,.present .routerPreview p,.present .routerPreview dt,.present .routerPreview dd,.present .routeMetric span,.present .routerPreview table { font-size:clamp(9px,.62vw,13px); }
+.present .consoleToggle { font-size: clamp(11px,.72vw,15px); }
+.present .consoleDrawer code { font-size: clamp(10px,.7vw,14px); }
 .present .lessonBullets li {
   font-size: clamp(13px, 0.92vw, 18px);
 }

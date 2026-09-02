@@ -1015,7 +1015,10 @@ function slidesForKmtiReference(): Slide[] {
     imageFit: "contain",
     imageOpacity: 100,
     images: [],
-    shapes: [],
+    shapes: (slide.shapes || []).map((shape) => ({
+      ...shape,
+      selected: false,
+    })),
   }));
 }
 function slidesForTemplate(name: string): Slide[] {
@@ -1052,6 +1055,94 @@ function slidesForTemplate(name: string): Slide[] {
         }
       : {}),
   }));
+}
+function enforceCollisionFreeLayout(slide: Slide): Slide {
+  const clean: Slide = {
+    ...slide,
+    selectedBlock: undefined,
+    selectedImageId: undefined,
+    selectedCallout: undefined,
+    shapes: (slide.shapes || []).map((shape) => ({
+      ...shape,
+      selected: false,
+    })),
+  };
+  if (slide.layout === "reference" || slide.visualLesson) return clean;
+
+  const hasVisual = Boolean(
+      slide.imageData || slide.imageDescription || slide.images?.length,
+    ),
+    isDiagram = [
+      "architecture",
+      "process",
+      "cycle",
+      "matrix",
+      "cards",
+      "comparison",
+      "diagram",
+    ].includes(slide.layout);
+
+  if (hasVisual) {
+    clean.titleX = 28;
+    clean.titleY = 25;
+    clean.titleW = 42;
+    clean.titleSize = Math.min(clean.titleSize || 44, 44);
+    clean.bodyX = 28;
+    clean.bodyY = 61;
+    clean.bodyW = 42;
+    clean.bodySize = Math.min(clean.bodySize || 18, 18);
+    clean.textAlign = "left";
+    clean.bodyAlign = "left";
+    const extraImages = (clean.images || []).slice(0, 4);
+    clean.imageX = 75;
+    clean.imageY = clean.imageData && extraImages.length ? 30 : 52;
+    clean.imageW = Math.min(clean.imageW || 40, 40);
+    clean.imageH =
+      clean.imageData && extraImages.length
+        ? 34
+        : Math.min(clean.imageH || 68, 72);
+    clean.images = extraImages.map((image, index) => ({
+      ...image,
+      x: extraImages.length === 1 ? 75 : 65 + (index % 2) * 21,
+      y: clean.imageData
+        ? 68 + Math.floor(index / 2) * 20
+        : 34 + Math.floor(index / 2) * 38,
+      w: extraImages.length === 1 ? 40 : 18,
+      h: clean.imageData ? 17 : extraImages.length === 1 ? 68 : 32,
+    }));
+    clean.shapes = (clean.shapes || []).map((shape, index) => ({
+      ...shape,
+      x: [8, 50, 92][index % 3],
+      y: index % 2 ? 91 : 9,
+    }));
+  } else if (isDiagram) {
+    clean.titleX = 50;
+    clean.titleY = 14;
+    clean.titleW = 82;
+    clean.titleSize = Math.min(clean.titleSize || 40, 40);
+    clean.bodyX = 50;
+    clean.bodyY = 26;
+    clean.bodyW = 76;
+    clean.bodySize = Math.min(clean.bodySize || 16, 16);
+    clean.shapes = (clean.shapes || []).map((shape, index) => ({
+      ...shape,
+      x: 20 + (index % 4) * 20,
+      y: 50 + Math.floor(index / 4) * 24,
+    }));
+  } else {
+    clean.titleX = 50;
+    clean.titleY = 27;
+    clean.titleW = Math.min(clean.titleW || 80, 82);
+    clean.bodyX = 50;
+    clean.bodyY = 61;
+    clean.bodyW = Math.min(clean.bodyW || 72, 76);
+    clean.shapes = (clean.shapes || []).map((shape, index) => ({
+      ...shape,
+      x: [8, 50, 92][index % 3],
+      y: index % 2 ? 91 : 9,
+    }));
+  }
+  return clean;
 }
 function professionalizeSlide(slide: Slide): Slide[] {
   const words = slide.body.trim().split(/\s+/).length,
@@ -1117,7 +1208,7 @@ function professionalizeSlide(slide: Slide): Slide[] {
         bodySize: 13,
         imageData: undefined,
         imageDescription: "",
-        shapes: [],
+        shapes: base.shapes,
         motion: "progressive-build",
       },
     ];
@@ -1155,7 +1246,7 @@ function professionalizeSlide(slide: Slide): Slide[] {
       imageY: 51,
       imageW: 36,
       imageH: 64,
-      shapes: [],
+      shapes: base.shapes,
       motion: "subtle-reveal",
     }));
   }
@@ -1175,7 +1266,7 @@ function professionalizeSlide(slide: Slide): Slide[] {
         imageY: 51,
         imageW: 34,
         imageH: 72,
-        shapes: [],
+        shapes: base.shapes,
       },
     ];
   const hasVisual = Boolean(slide.imageData || slide.imageDescription);
@@ -1200,7 +1291,9 @@ function professionalizeSlide(slide: Slide): Slide[] {
 function professionalizeDeck(slides: Slide[]) {
   return slides
     .flatMap(professionalizeSlide)
-    .map((slide, index) => ({ ...slide, id: index + 1 }));
+    .map((slide, index) =>
+      enforceCollisionFreeLayout({ ...slide, id: index + 1 }),
+    );
 }
 function Logo() {
   return (
@@ -1278,6 +1371,9 @@ export default function Studio() {
             "Use one focal element and one supporting element per slide",
             "Every image must explain the message rather than decorate it",
             "Title, body, code and image bounding boxes must never overlap",
+            "For content-image slides reserve x=7–49 for text and x=55–95 for the image; keep a minimum 6% horizontal gutter",
+            "For diagram slides reserve y=8–32 for heading and explanation, and y=38–92 for all diagram nodes and connectors",
+            "Do not place decorations inside title, body, image, code or diagram bounding boxes",
             "Prefer three focused slides over one overloaded slide",
             "Choose accessible colours with strong contrast",
             "Create deliberate visual hierarchy and non-overlapping geometry",
@@ -1290,6 +1386,12 @@ export default function Studio() {
             schema_version: "s2s-autopilot-1",
             title: "string",
             audience: "string",
+            layout_policy: {
+              collision_free: true,
+              safe_margin_percent: 5,
+              minimum_gutter_percent: 6,
+              overflow_strategy: "split-slide",
+            },
             design_system: {
               theme:
                 "studio | classroom | developer | product | executive | research | founder | editorial | lab",
@@ -1321,7 +1423,7 @@ export default function Studio() {
                 },
                 purpose: "string",
                 layout:
-                  "cover | content | number | matrix | process | cards | comparison | architecture | code | cycle | summary",
+                  "cover | content | content-image | number | matrix | process | cards | comparison | architecture | diagram | code | code-demo | cycle | summary",
                 background: "#RRGGBB",
                 visual: {
                   image_url: "direct HTTPS URL or empty string",
@@ -1474,13 +1576,16 @@ export default function Studio() {
         allowedLayouts = [
           "cover",
           "content",
+          "content-image",
           "number",
           "matrix",
           "process",
           "cards",
           "comparison",
           "architecture",
+          "diagram",
           "code",
+          "code-demo",
           "cycle",
           "summary",
         ],
@@ -1508,12 +1613,12 @@ export default function Studio() {
             !String(slide.imageData).startsWith("/api/images/")
           )
             throw new Error(`Shared slide ${index + 1} contains an unsupported image URL.`);
-          return {
+          return enforceCollisionFreeLayout({
             ...slide,
             id: index + 1,
             shapes: Array.isArray(slide.shapes) ? slide.shapes.slice(0, 40) : [],
             images: Array.isArray(slide.images) ? slide.images.slice(0, 20) : undefined,
-          } as Slide;
+          } as Slide);
         });
         setSlides(imported);
         setDeckTitle(
@@ -1545,7 +1650,8 @@ export default function Studio() {
           const visual = s.visual || {},
             url =
               typeof visual.image_url === "string" &&
-              visual.image_url.startsWith("https://")
+              (visual.image_url.startsWith("https://") ||
+                visual.image_url.startsWith("/api/images/"))
                 ? visual.image_url
                 : undefined,
             animation = (v: any, f: string) =>
@@ -1989,7 +2095,21 @@ export default function Studio() {
           setTab={setTab}
           blueprint={() => setView("blueprint")}
           save={saveDeck}
-          present={() => setView("present")}
+          present={() => {
+            setSlides((previous: Slide[]) =>
+              previous.map((slide: Slide) => ({
+                ...slide,
+                selectedBlock: undefined,
+                selectedImageId: undefined,
+                selectedCallout: undefined,
+                shapes: (slide.shapes || []).map((shape: Shape) => ({
+                  ...shape,
+                  selected: false,
+                })),
+              })),
+            );
+            setView("present");
+          }}
           add={() => {
             setSlides([
               ...slides,
@@ -2798,7 +2918,13 @@ function Blueprint({ aiLocked, title, slides, setSlides, back, next }: any) {
       const portableDeck = {
         schema_version: "s2s-studio-deck-1",
         title: title || slides[0]?.title || "Untitled presentation",
-        slides,
+        layout_policy: {
+          collision_free: true,
+          safe_margin_percent: 5,
+          minimum_gutter_percent: 6,
+          normalized_by: "s2s-layout-engine-1",
+        },
+        slides: slides.map(enforceCollisionFreeLayout),
       };
       await navigator.clipboard.writeText(JSON.stringify(portableDeck, null, 2));
       setDeckCopied(true);
@@ -3266,6 +3392,18 @@ function Editor({
               <button onClick={addBodyBullets} title="Format slide content as bullet points">
                 • Bullets
               </button>
+              {cur.selectedBlock === "title" && (
+                <label className="contextTitleSize" title="Selected title font size">
+                  Aa
+                  <input
+                    type="number"
+                    min="20"
+                    max="96"
+                    value={cur.titleSize || 34}
+                    onChange={(event) => update("titleSize", +event.target.value)}
+                  />
+                </label>
+              )}
             </div>
             {cur.visualLesson?.mode === "diagram" && (
               <div className="diagramToolbarTop">
@@ -3989,7 +4127,41 @@ export function SlideView({
         </b>
         <small>{s.tag}</small>
         {(s.visualLesson.mode === "code" || s.visualLesson.mode === "split") && (
-          <h1>{s.title}</h1>
+          <h1
+            contentEditable={!!update && !presenting}
+            suppressContentEditableWarning
+            className={`${s.selectedBlock === "title" ? "selectedCanvasBlock" : ""} editableLessonTitle`}
+            onClick={() =>
+              update?.("__patch", {
+                selectedBlock: "title",
+                selectedImageId: undefined,
+              })
+            }
+            onDoubleClick={(event) => event.currentTarget.focus()}
+            onPointerDown={(event) => {
+              if (!update || presenting) return;
+              event.currentTarget.setPointerCapture(event.pointerId);
+            }}
+            onPointerMove={(event) =>
+              update &&
+              !presenting &&
+              event.buttons === 1 &&
+              event.currentTarget.hasPointerCapture(event.pointerId) &&
+              moveBlock("title", event.clientX, event.clientY)
+            }
+            onBlur={(event) => update?.("title", event.currentTarget.innerText)}
+            style={{
+              left: `${s.titleX ?? 50}%`,
+              top: `${s.titleY ?? 10}%`,
+              width: `${s.titleW ?? 88}%`,
+              fontFamily: s.fontFamily,
+              fontSize: s.titleSize || 34,
+              color: s.textColor,
+              textAlign: s.textAlign,
+            }}
+          >
+            {s.title}
+          </h1>
         )}
         <VisualLessonScene
           lesson={s.visualLesson}
@@ -4174,7 +4346,14 @@ export function SlideView({
           }}
           onBlur={(e: any) => update?.("body", e.currentTarget.innerText)}
         >
-          {s.body}
+          {s.body.split("\n").map((line: string, index: number) => (
+            <span
+              className={`slideBodyLine ${line.trim().startsWith("•") ? "bulletLine" : ""}`}
+              key={`${index}-${line}`}
+            >
+              {line || "\u00a0"}
+            </span>
+          ))}
         </p>
       )}
       {code && <CodeOutput source={codeParts?.code || s.body} />}{" "}

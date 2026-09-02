@@ -69,6 +69,95 @@ export type VisualLessonSpec = {
 
 const clamp = (value: number, min: number, max: number) =>
   Math.max(min, Math.min(max, value));
+const normalizedCodeFilename = (filename: string) =>
+  filename.replace(/\s*\([^)]*\)\s*$/g, "").trim();
+function parseStructuredRunOutput(value: string) {
+  const text = value.replaceAll("**", "").trim(),
+    routeHeader = /──\s*(?:Click\s+'([^']+)'\s*→\s*)?URL:\s*([^\s─]+)(?:\s*\(([^)]*)\))?\s*──/gi,
+    routeMatches = Array.from(text.matchAll(routeHeader)),
+    routerPages = routeMatches.map((match, index) => {
+      const section = text.slice(
+          (match.index || 0) + match[0].length,
+          routeMatches[index + 1]?.index ?? text.length,
+        ),
+        path = match[2],
+        defaultName = match[3]?.match(/(?:—|-)\s*([^)]+)/)?.[1]?.trim(),
+        label = match[1] || defaultName || (path === "/" ? "Dashboard" : path.slice(1)),
+        portal = section.match(/│\s*([^│]+Portal)\s*│/i)?.[1]?.trim() || "Application",
+        percent = section.match(/(\d+(?:\.\d+)?%)/)?.[1],
+        fields = ["Full Name", "Roll No", "Branch"]
+          .map((name) => ({
+            name,
+            value: section.match(new RegExp(`${name}:\\s*([^│]+)`, "i"))?.[1]?.trim() || "",
+          }))
+          .filter((field) => field.value),
+        rows = Array.from(
+          section.matchAll(/│\s*([A-Z]{2}\d{3})\s*│\s*([^│]+?)\s*│\s*(\d+\s*\/\s*\d+)\s*│/g),
+          (row) => ({ code: row[1], subject: row[2].trim(), marks: row[3] }),
+        ),
+        title =
+          section.match(/(Student Dashboard|Student Profile|Attendance Tracker|Academic Marks)/i)?.[1] ||
+          label,
+        message =
+          section.match(/(Welcome back,[^│]+|Select a tab above\.)/i)?.[1]?.trim() || "";
+      return { path, label, portal, title, message, percent, fields, rows };
+    }),
+    browserAt = text.search(/(?:^|[─—\s])Browser(?:\s|\()/i),
+    hasBrowser = browserAt >= 0 || routerPages.length > 0,
+    consoleAt = text.search(/DevTools\s+Console/i),
+    hasConsole = consoleAt >= 0,
+    browserPart = hasBrowser
+      ? browserAt >= 0
+        ? text.slice(browserAt, consoleAt >= 0 ? consoleAt : undefined)
+        : ""
+      : "",
+    consolePart = consoleAt >= 0 ? text.slice(consoleAt) : "",
+    buttonMatch = browserPart.match(/\[\s*([^\]]+?)\s*\]/),
+    buttonLabel = buttonMatch?.[1]?.trim() || "Run preview",
+    hintMatch = browserPart.match(/\]\s*(?:│)?\s*(←[^└\n]+?)(?=└|DevTools|$)/i),
+    browserUrl = browserPart.match(/Browser\s*\(([^)]+)\)/i)?.[1]?.trim() || "",
+    framedBrowserLines = Array.from(
+      browserPart.matchAll(/│\s*([^│]+?)\s*│/g),
+      (match) => match[1].trim(),
+    ).filter((line) => line && !/^←/.test(line) && !line.includes("[")),
+    fallbackBrowserLines = browserPart
+      .split("\n")
+      .map((line) =>
+        line
+          .replace(/.*Browser(?:\s*\([^)]+\))?.*/i, "")
+          .replace(/[┌┐└┘│]/g, "")
+          .replace(/^[─—\-\s]+|[─—\-\s]+$/g, "")
+          .trim(),
+      )
+      .filter(
+        (line) =>
+          line &&
+          !line.includes("[") &&
+          !/^←/.test(line) &&
+          !/^[─—\-\s]+$/.test(line),
+      ),
+    browserContent = (framedBrowserLines.length
+      ? framedBrowserLines
+      : fallbackBrowserLines
+    ).join("\n"),
+    consoleLines = consolePart
+      .replace(/^[\s─—-]*DevTools\s+Console[\s─—-]*/i, "")
+      .split(/\s*>\s*/)
+      .map((line) => line.replace(/[│┌┐└┘]/g, "").trim())
+      .filter(Boolean);
+  return {
+    enabled: hasBrowser || hasConsole,
+    hasBrowser,
+    hasConsole,
+    browserUrl,
+    browserContent,
+    routerPages,
+    hasButton: Boolean(buttonMatch),
+    buttonLabel,
+    buttonHint: hintMatch?.[1]?.trim() || "",
+    consoleLines,
+  };
+}
 const DIAGRAM_OFFSET_Y = 105;
 function MarkerStroke({
   path,
@@ -175,6 +264,10 @@ export default function VisualLessonScene({
     [activeFile, setActiveFile] = useState(0),
     [fileAnimationKey, setFileAnimationKey] = useState(0),
     [previewOpen, setPreviewOpen] = useState(false),
+    [consoleOpen, setConsoleOpen] = useState(false),
+    [consoleHeight, setConsoleHeight] = useState(126),
+    [activeRoute, setActiveRoute] = useState(0),
+    consoleResizeRef = useRef<{ y: number; height: number } | null>(null),
     source = files[Math.min(activeFile, files.length - 1)]?.source || "",
     [visible, setVisible] = useState(
       presenting && lesson.mode === "code" ? 0 : source.length,
@@ -836,9 +929,13 @@ export default function VisualLessonScene({
     lines = displayed.split("\n"),
     fileDone = visible >= source.length,
     done = fileDone,
+    outputText = String(lesson.code?.output || ""),
+    outputIsDetailed = outputText.includes("\n") || outputText.length > 72,
+    structuredOutput = parseStructuredRunOutput(outputText),
     activeFilename = files[Math.min(activeFile, files.length - 1)]?.filename || "",
+    normalizedActiveFilename = normalizedCodeFilename(activeFilename),
     canRunPreview =
-      /(^|\/)app\.jsx$/i.test(activeFilename) &&
+      /(^|\/)app\.jsx$/i.test(normalizedActiveFilename) &&
       /react|jsx/i.test(lesson.code?.language || "");
   return (
     <div
@@ -857,13 +954,15 @@ export default function VisualLessonScene({
                 onClick={() => {
                   setActiveFile(index);
                   setPreviewOpen(false);
+                  setConsoleOpen(false);
+                  setActiveRoute(0);
                   if (presenting) {
                     setVisible(0);
                     setFileAnimationKey((key) => key + 1);
                   } else setVisible(file.source.length);
                 }}
               >
-                {file.filename}
+                {normalizedCodeFilename(file.filename)}
               </button>
             ))}
           </nav>
@@ -871,7 +970,11 @@ export default function VisualLessonScene({
           {canRunPreview && (
             <button
               className="codeRunButton"
-              onClick={() => setPreviewOpen((open) => !open)}
+              onClick={() => {
+                setPreviewOpen((open) => !open);
+                setConsoleOpen(false);
+                setActiveRoute(0);
+              }}
               disabled={!done}
             >
               {previewOpen ? "Hide output" : done ? "Run ▶" : "Typing…"}
@@ -901,11 +1004,142 @@ export default function VisualLessonScene({
           <span>React preview</span>
           <b>● LIVE</b>
         </header>
-        <div>
-          <strong>
-            {done ? lesson.code?.output : "Waiting for the component…"}
-          </strong>
-        </div>
+        {structuredOutput.enabled ? (
+          <div className="browserEmulator">
+            {structuredOutput.hasBrowser && (
+              <>
+                <div className="browserEmulatorBar">
+                  <i /><i /><i />
+                  <span>
+                    Browser
+                    {(structuredOutput.routerPages[activeRoute]?.path ||
+                      structuredOutput.browserUrl) && (
+                      <small>
+                        {structuredOutput.routerPages[activeRoute]?.path ||
+                          structuredOutput.browserUrl}
+                      </small>
+                    )}
+                  </span>
+                </div>
+                <div className="browserViewport">
+                  {structuredOutput.routerPages.length ? (
+                    <div className="routerPreview">
+                      <header>
+                        <b>{structuredOutput.routerPages[activeRoute]?.portal}</b>
+                        <nav>
+                          {structuredOutput.routerPages.map((page, index) => (
+                            <button
+                              className={index === activeRoute ? "active" : ""}
+                              key={`${page.path}-${index}`}
+                              onClick={() => setActiveRoute(index)}
+                            >
+                              {page.label}
+                            </button>
+                          ))}
+                        </nav>
+                      </header>
+                      <section>
+                        <h3>{structuredOutput.routerPages[activeRoute]?.title}</h3>
+                        {structuredOutput.routerPages[activeRoute]?.message && (
+                          <p>{structuredOutput.routerPages[activeRoute].message}</p>
+                        )}
+                        {!!structuredOutput.routerPages[activeRoute]?.fields.length && (
+                          <dl>
+                            {structuredOutput.routerPages[activeRoute].fields.map((field) => (
+                              <div key={field.name}><dt>{field.name}</dt><dd>{field.value}</dd></div>
+                            ))}
+                          </dl>
+                        )}
+                        {structuredOutput.routerPages[activeRoute]?.percent && (
+                          <div className="routeMetric">
+                            <strong>{structuredOutput.routerPages[activeRoute].percent}</strong>
+                            <span>Overall Semester Attendance</span>
+                          </div>
+                        )}
+                        {!!structuredOutput.routerPages[activeRoute]?.rows.length && (
+                          <table>
+                            <thead><tr><th>Code</th><th>Subject</th><th>Marks</th></tr></thead>
+                            <tbody>
+                              {structuredOutput.routerPages[activeRoute].rows.map((row) => (
+                                <tr key={row.code}><td>{row.code}</td><td>{row.subject}</td><td>{row.marks}</td></tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        )}
+                      </section>
+                    </div>
+                  ) : structuredOutput.hasButton ? (
+                    <div className="browserMockAction">
+                      <span>{structuredOutput.buttonLabel}</span>
+                      {structuredOutput.buttonHint && (
+                        <em>{structuredOutput.buttonHint}</em>
+                      )}
+                    </div>
+                  ) : (
+                    <div className="browserRenderedContent">
+                      {structuredOutput.browserContent}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+            {structuredOutput.hasConsole && (
+              <>
+                <button
+                  className="consoleToggle"
+                  aria-expanded={consoleOpen}
+                  onClick={() => setConsoleOpen((open) => !open)}
+                >
+                  <span>›_ DevTools Console</span>
+                  <b>{consoleOpen ? "Hide" : "Open"} {structuredOutput.consoleLines.length}</b>
+                </button>
+                {consoleOpen && (
+                  <div className="consoleDrawer" style={{ height: consoleHeight }}>
+                    <i
+                      className="consoleResizeHandle"
+                      title="Drag to resize console"
+                      onPointerDown={(event) => {
+                        consoleResizeRef.current = {
+                          y: event.clientY,
+                          height: consoleHeight,
+                        };
+                        event.currentTarget.setPointerCapture(event.pointerId);
+                      }}
+                      onPointerMove={(event) => {
+                        if (
+                          !consoleResizeRef.current ||
+                          !event.currentTarget.hasPointerCapture(event.pointerId)
+                        )
+                          return;
+                        setConsoleHeight(
+                          clamp(
+                            consoleResizeRef.current.height +
+                              consoleResizeRef.current.y -
+                              event.clientY,
+                            72,
+                            340,
+                          ),
+                        );
+                      }}
+                      onPointerUp={() => {
+                        consoleResizeRef.current = null;
+                      }}
+                    />
+                    {structuredOutput.consoleLines.map((line, index) => (
+                      <code key={`${line}-${index}`}><i>›</i>{line}</code>
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        ) : (
+          <div>
+            <strong className={outputIsDetailed ? "detailedOutput" : "simpleOutput"}>
+              {done ? outputText : "Waiting for the component…"}
+            </strong>
+          </div>
+        )}
       </section>
       )}
       {!!lesson.code?.bullets?.length && (
